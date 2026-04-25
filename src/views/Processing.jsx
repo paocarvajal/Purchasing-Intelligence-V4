@@ -61,8 +61,28 @@ export default function Processing() {
 
   const exportAll = () => {
     if (state.items.length === 0) return;
-    const existing = state.items.map(i => ({ 'Internal Reference': i.skuOriginal, 'Cost': i.cost.toFixed(2), 'Sales Price': i.suggestedPrice.toFixed(2), 'Product Category': i.category }));
-    const architecture = state.items.map(i => ({ 'Internal Reference': i.skuShielded, 'Name': i.description, 'Cost': i.cost.toFixed(2), 'Sales Price': i.suggestedPrice.toFixed(2), 'Product Category': i.category }));
+    
+    // Solo lo que YA existe en Odoo
+    const existing = state.items
+      .filter(i => i.isExisting)
+      .map(i => ({ 
+        'Internal Reference': i.skuOriginal, 
+        'Cost': i.cost.toFixed(2), 
+        'Sales Price': i.suggestedPrice.toFixed(2), 
+        'Product Category': i.category 
+      }));
+
+    // Solo lo que es NUEVO y de tipo PRODUCTO (Mercancía)
+    const architecture = state.items
+      .filter(i => !i.isExisting && i.odooType === 'Producto')
+      .map(i => ({ 
+        'Internal Reference': i.skuShielded, 
+        'Name': i.description, 
+        'Cost': i.cost.toFixed(2), 
+        'Sales Price': i.suggestedPrice.toFixed(2), 
+        'Product Category': i.category 
+      }));
+
     downloadCSV(existing, '1_Odoo_Actualizar_Existentes.csv');
     downloadCSV(architecture, '2_Odoo_Importar_Nuevos_Estructura.csv');
   };
