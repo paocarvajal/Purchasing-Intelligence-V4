@@ -34,6 +34,7 @@ export default function Processing() {
   const [filterCat, setFilterCat] = useState('');
   const [filterMonth, setFilterMonth] = useState('');
   const [showOnlyPending, setShowOnlyPending] = useState(false);
+  const [isDropzoneExpanded, setIsDropzoneExpanded] = useState(state.items.length === 0);
   const [groupBy, setGroupBy] = useState('uuid'); 
 
   const onDrop = useCallback(async (e) => {
@@ -41,7 +42,8 @@ export default function Processing() {
     setIsDragging(false);
     const files = Array.from(e.dataTransfer.files);
     await handleFiles(files);
-  }, []);
+    setIsDropzoneExpanded(false); // Colapsar después de subir
+  }, [state.items.length]);
 
   const handleFiles = async (files) => {
     // Separate XMLs and potentially a CSV for accounts
@@ -139,24 +141,45 @@ export default function Processing() {
         <StatCard label="Modo Vista" value={groupBy === 'uuid' ? 'Por Factura' : 'Por Proveedor'} sub="clic para cambiar" icon={Calculator} color="bg-purple-500" onClick={() => setGroupBy(groupBy === 'uuid' ? 'provider' : 'uuid')} />
       </div>
 
-      {/* Dropzone RESTORED */}
-      <div 
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={onDrop}
-        onClick={() => document.getElementById('xml-input').click()}
-        className={cn(
-          "glass rounded-3xl p-10 border-2 border-dashed transition-all cursor-pointer flex flex-col items-center justify-center gap-4 group",
-          isDragging ? "border-blue-500 bg-blue-500/10 scale-[1.01]" : "border-white/10 hover:border-white/20 hover:bg-white/5"
+      {/* Dropzone Collapsible */}
+      <div className="relative group/dropzone">
+        {!isDropzoneExpanded && state.items.length > 0 && (
+          <button 
+            onClick={() => setIsDropzoneExpanded(true)}
+            className="w-full py-3 glass border border-white/10 rounded-2xl text-xs font-black uppercase tracking-widest text-blue-400 hover:bg-blue-500/10 transition-all flex items-center justify-center gap-2"
+          >
+            <Upload className="w-4 h-4" />
+            Añadir más facturas XML
+          </button>
         )}
-      >
-        <input id="xml-input" type="file" multiple accept=".xml" className="hidden" onChange={(e) => handleFiles(Array.from(e.target.files))} />
-        <div className="p-4 rounded-full bg-blue-500/10 text-blue-400 group-hover:scale-110 transition-transform">
-          <Upload className="w-8 h-8" />
-        </div>
-        <div className="text-center">
-          <p className="text-lg font-black text-white tracking-tight">Arrastra tus facturas XML aquí</p>
-          <p className="text-sm text-slate-500 font-medium">o haz clic para buscar archivos en tu computadora</p>
+
+        <div 
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={onDrop}
+          onClick={() => document.getElementById('xml-input').click()}
+          className={cn(
+            "glass rounded-3xl transition-all cursor-pointer flex flex-col items-center justify-center gap-4 group relative overflow-hidden",
+            isDragging ? "border-2 border-dashed border-blue-500 bg-blue-500/10 scale-[1.01]" : "border-2 border-dashed border-white/10 hover:border-white/20 hover:bg-white/5",
+            isDropzoneExpanded ? "p-10 h-auto opacity-100" : "h-0 p-0 opacity-0 pointer-events-none"
+          )}
+        >
+          {isDropzoneExpanded && state.items.length > 0 && (
+             <button 
+               onClick={(e) => { e.stopPropagation(); setIsDropzoneExpanded(false); }}
+               className="absolute top-4 right-4 p-2 rounded-full bg-white/5 hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-all"
+             >
+               <RefreshCcw className="w-4 h-4" />
+             </button>
+          )}
+          <input id="xml-input" type="file" multiple accept=".xml" className="hidden" onChange={(e) => { handleFiles(Array.from(e.target.files)); setIsDropzoneExpanded(false); }} />
+          <div className="p-4 rounded-full bg-blue-500/10 text-blue-400 group-hover:scale-110 transition-transform">
+            <Upload className="w-8 h-8" />
+          </div>
+          <div className="text-center">
+            <p className="text-lg font-black text-white tracking-tight">Arrastra tus facturas XML aquí</p>
+            <p className="text-sm text-slate-500 font-medium">o haz clic para buscar archivos en tu computadora</p>
+          </div>
         </div>
       </div>
 
@@ -251,11 +274,11 @@ export default function Processing() {
                        </td>
                        <td className="px-6 py-2">
                           <div className="flex items-center gap-2">
-                            <select onChange={(e) => applyToGroup(items, { odooType: e.target.value })} className="bg-transparent text-[9px] font-black uppercase text-blue-300 border-none focus:outline-none">
+                             <select onChange={(e) => applyToGroup(items, { odooType: e.target.value })} className="bg-slate-800/50 text-[10px] font-bold uppercase text-white border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500">
                                <option value="">Tipo Bloque →</option>
                                {TIPOS_ODOO.map(t => <option key={t} value={t}>{t}</option>)}
                              </select>
-                             <select onChange={(e) => applyToGroup(items, { account: e.target.value })} className="bg-transparent text-[9px] font-black uppercase text-blue-300 border-none focus:outline-none max-w-[150px]">
+                             <select onChange={(e) => applyToGroup(items, { account: e.target.value })} className="bg-slate-800/50 text-[10px] font-bold uppercase text-white border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[150px]">
                                <option value="">Cuenta Bloque →</option>
                                {CUENTAS.map(c => <option key={c.codigo} value={`${c.codigo} — ${c.nombre}`}>{c.codigo} — ${c.nombre}</option>)}
                              </select>
@@ -305,16 +328,16 @@ export default function Processing() {
                            </div>
                          </td>
                          <td className="px-6 py-4">
-                           <select value={item.odooType || ''} onChange={(e) => updateItem(item.id, { odooType: e.target.value })} className="bg-background/50 border border-white/5 rounded-lg text-[10px] px-2 py-1 focus:outline-none">
-                             <option value="">Sin Tipo...</option>
-                             {TIPOS_ODOO.map(t => <option key={t} value={t}>{t}</option>)}
-                           </select>
+                            <select value={item.odooType || ''} onChange={(e) => updateItem(item.id, { odooType: e.target.value })} className="bg-slate-900 border border-white/10 rounded-lg text-[10px] px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/40 text-white w-full">
+                              <option value="">Sin Tipo...</option>
+                              {TIPOS_ODOO.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
                          </td>
                          <td className="px-6 py-4">
-                           <select value={item.account || ''} onChange={(e) => updateItem(item.id, { account: e.target.value })} className="bg-background/50 border border-white/5 rounded-lg text-[10px] px-2 py-1 focus:outline-none max-w-[180px]">
-                             <option value="">Sin Cuenta...</option>
-                             {CUENTAS.map(c => <option key={c.codigo} value={`${c.codigo} — ${c.nombre}`}>{c.codigo} — ${c.nombre}</option>)}
-                           </select>
+                            <select value={item.account || ''} onChange={(e) => updateItem(item.id, { account: e.target.value })} className="bg-slate-900 border border-white/10 rounded-lg text-[10px] px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/40 text-white w-full max-w-[220px]">
+                              <option value="">Sin Cuenta...</option>
+                              {CUENTAS.map(c => <option key={c.codigo} value={`${c.codigo} — ${c.nombre}`}>{c.codigo} — ${c.nombre}</option>)}
+                            </select>
                          </td>
                          <td className="px-6 py-4 text-right text-xs font-bold text-white">${item.subtotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</td>
                          <td className="px-6 py-4 text-right">

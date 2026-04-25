@@ -8,5 +8,5 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  base: '/Purchasing-Intelligence-V4/',
+  base: './',
 })
