@@ -80,7 +80,8 @@ export default function Processing() {
         'Name': i.description, 
         'Cost': i.cost.toFixed(2), 
         'Sales Price': i.suggestedPrice.toFixed(2), 
-        'Product Category': i.category 
+        'Product Category': i.category,
+        'Vendor': i.provider // Añadimos el proveedor para poder filtrar en Odoo
       }));
 
     downloadCSV(existing, '1_Odoo_Actualizar_Existentes.csv');
