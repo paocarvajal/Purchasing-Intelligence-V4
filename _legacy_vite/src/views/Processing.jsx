@@ -81,11 +81,36 @@ export default function Processing() {
         'Cost': i.cost.toFixed(2), 
         'Sales Price': i.suggestedPrice.toFixed(2), 
         'Product Category': i.category,
-        'Vendor': i.provider // Añadimos el proveedor para poder filtrar en Odoo
+        'Product Type': 'Storable Product', // Asegura que rastree inventario
+        'Vendors/Vendor': i.provider, // Mapeo correcto para pestaña Compras
+        'Customer Taxes': 'IVA 16% (VENTAS)', // Ajuste de impuestos
+        'Vendor Taxes': 'IVA 16% (COMPRAS)'
       }));
 
     downloadCSV(existing, '1_Odoo_Actualizar_Existentes.csv');
     downloadCSV(architecture, '2_Odoo_Importar_Nuevos_Estructura.csv');
+  };
+
+  const exportInventory = () => {
+    if (state.items.length === 0) return;
+
+    // BLOQUEO DE SEGURIDAD: Solo lo que es para VENTA (Producto)
+    // Se excluyen explícitamente Gastos, Servicios y Mantenimiento.
+    const stockData = state.items
+      .filter(i => i.odooType === 'Producto') 
+      .map(i => ({
+        'product_id/default_code': i.isExisting ? i.skuOriginal : i.skuShielded,
+        'inventory_quantity': i.quantity,
+        'location_id': 'WH/Stock',
+        'inventory_diff_quantity': i.quantity
+      }));
+
+    if (stockData.length === 0) {
+      alert("No hay artículos marcados como 'Producto' para cargar al inventario.");
+      return;
+    }
+
+    downloadCSV(stockData, '3_Odoo_Cargar_Existencias_Iniciales.csv');
   };
 
   const downloadCSV = (data, filename) => {
@@ -146,6 +171,15 @@ export default function Processing() {
 
   return (
     <div className="space-y-6">
+      {/* Brand Header */}
+      <div className="flex items-center gap-4 mb-2">
+        <img src="logo.png" alt="HerraMax Plus" className="h-16 w-auto object-contain" />
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Purchasing Intelligence</h1>
+          <p className="text-xs text-slate-400 font-medium">Auditoría y Automatización de Facturas XML</p>
+        </div>
+      </div>
+
       {/* KPI Header */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard label="Gasto Filtrado" value={`$${stats.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`} sub={`${filteredItems.length} líneas`} icon={TrendingUp} color="bg-blue-500" />
@@ -248,6 +282,11 @@ export default function Processing() {
           <button onClick={exportAll} className="flex items-center gap-2 px-6 py-2.5 bg-secondary hover:bg-amber-500 text-black rounded-xl transition-all shadow-lg shadow-amber-500/20 ml-auto">
             <Download className="w-4 h-4" />
             <span className="text-sm font-bold">Exportar Todo</span>
+          </button>
+
+          <button onClick={exportInventory} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg shadow-blue-500/20">
+            <Box className="w-4 h-4" />
+            <span className="text-sm font-bold">Exportar Existencias (Stock)</span>
           </button>
         </div>
       </div>
