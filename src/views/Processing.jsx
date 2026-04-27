@@ -16,7 +16,8 @@ import {
   AlertTriangle,
   Fingerprint,
   RefreshCcw,
-  BookOpen
+  BookOpen,
+  Box
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { parseInvoiceXml } from '../core/xml-parser';
