@@ -173,7 +173,7 @@ export default function Processing() {
     <div className="space-y-6">
       {/* Brand Header */}
       <div className="flex items-center gap-4 mb-2">
-        <img src="logo.png" alt="HerraMax Plus" className="h-16 w-auto object-contain" />
+        <img src={import.meta.env.BASE_URL + "logo.png"} alt="HerraMax Plus" className="h-16 w-auto object-contain" />
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Purchasing Intelligence</h1>
           <p className="text-xs text-slate-400 font-medium">Auditoría y Automatización de Facturas XML</p>
