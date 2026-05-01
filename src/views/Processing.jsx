@@ -80,6 +80,7 @@ export default function Processing() {
   const [groupBy, setGroupBy] = useState('uuid');
   const [archiveStatus, setArchiveStatus] = useState(state.lastImportReport?.summary || '');
   const [importReport, setImportReport] = useState(state.lastImportReport || null);
+  const [importProgress, setImportProgress] = useState(null);
   const activeImportReport = importReport || state.lastImportReport;
   const xmlAccept = '.xml,.XML,text/xml,application/xml';
 
@@ -91,6 +92,7 @@ export default function Processing() {
     setFilterMonth('');
     setShowOnlyPending(false);
     setShowIgnoredAudit(true);
+    setImportProgress(null);
 
     const xmls = files.filter((file) => {
       const name = file.name.toLowerCase();
@@ -126,6 +128,8 @@ export default function Processing() {
     let saved = 0;
     let duplicates = 0;
     let localOnly = 0;
+    const archiveJobs = [];
+    setImportProgress(xmls.length > 0 ? { current: 0, total: xmls.length, phase: 'Leyendo XML locales' } : null);
     for (const file of xmls) {
       const fileLabel = getFileLabel(file);
       try {
@@ -167,28 +171,17 @@ export default function Processing() {
           addedLines: newLines.length,
         });
         addItems(lines);
-        try {
-          const result = await saveInvoiceWithLines(invoice, lines, xmlText);
-          if (result.status === 'duplicate') {
-            duplicates += 1;
-            report.duplicateCloud += 1;
-          } else {
-            saved += 1;
-            report.saved += 1;
-          }
-        } catch (cloudError) {
-          console.error(cloudError);
-          localOnly += 1;
-          report.localOnly += 1;
-        }
+        archiveJobs.push({ invoice, lines, xmlText });
+        setImportProgress({ current: report.parsed, total: xmls.length, phase: 'Leyendo XML locales' });
       } catch (error) {
         console.error(error);
         report.failed.push({ file: fileLabel, reason: error.message });
+        setImportProgress({ current: report.parsed + report.failed.length, total: xmls.length, phase: 'Leyendo XML locales' });
       }
     }
     report.uniqueUuids = new Set(report.invoiceFiles.map((invoice) => invoice.uuid)).size;
     const summary = xmls.length > 0
-      ? `${report.parsed}/${report.xml} XML leidos. ${report.uniqueUuids} UUID unicos, ${report.added} facturas nuevas, ${report.addedLines} lineas nuevas. ${saved} archivadas en Firebase, ${duplicates} duplicadas en Firebase, ${localOnly} solo locales.`
+      ? `${report.parsed}/${report.xml} XML leidos localmente. ${report.uniqueUuids} UUID unicos, ${report.added} facturas nuevas, ${report.addedLines} lineas nuevas. Archivando en Firebase en segundo plano.`
       : 'No encontre XML en la seleccion. Abre la carpeta sincronizada de Google Drive o usa Importar carpeta XML.';
     const finalReport = { ...report, summary, importedAt: new Date().toISOString() };
     setImportReport(finalReport);
@@ -197,6 +190,38 @@ export default function Processing() {
       setArchiveStatus(summary);
     } else if (files.length > 0) {
       setArchiveStatus(summary);
+    }
+
+    if (archiveJobs.length > 0) {
+      setImportProgress({ current: 0, total: archiveJobs.length, phase: 'Archivando Firebase' });
+      void Promise.allSettled(archiveJobs.map(async (job, index) => {
+        try {
+          const result = await saveInvoiceWithLines(job.invoice, job.lines, job.xmlText);
+          setImportProgress({ current: index + 1, total: archiveJobs.length, phase: 'Archivando Firebase' });
+          return result;
+        } catch (error) {
+          console.error(error);
+          setImportProgress({ current: index + 1, total: archiveJobs.length, phase: 'Archivando Firebase' });
+          throw error;
+        }
+      })).then((results) => {
+        results.forEach((result) => {
+          if (result.status === 'fulfilled' && result.value?.status === 'duplicate') duplicates += 1;
+          else if (result.status === 'fulfilled') saved += 1;
+          else localOnly += 1;
+        });
+        const archivedReport = {
+          ...finalReport,
+          saved,
+          duplicateCloud: duplicates,
+          localOnly,
+          summary: `${finalReport.parsed}/${finalReport.xml} XML leidos localmente. ${saved} archivadas en Firebase, ${duplicates} duplicadas en Firebase, ${localOnly} solo locales.`,
+        };
+        setImportReport(archivedReport);
+        setLastImportReport(archivedReport);
+        setArchiveStatus(archivedReport.summary);
+        setImportProgress(null);
+      });
     }
   }, [addInvoice, addItems, setLastImportReport, state.invoices, state.items]);
 
@@ -420,6 +445,16 @@ export default function Processing() {
             <button onClick={() => setIsDropzoneExpanded(true)} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-black uppercase tracking-widest text-white transition-all">
               Revisar / reimportar
             </button>
+          </div>
+        </div>
+      )}
+
+      {importProgress && (
+        <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-4 shadow-xl">
+          <p className="text-xs font-black uppercase tracking-widest text-blue-300">{importProgress.phase}</p>
+          <p className="text-sm text-slate-100 font-bold">{importProgress.current} / {importProgress.total}</p>
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-900">
+            <div className="h-full rounded-full bg-blue-400 transition-all" style={{ width: `${Math.min(100, Math.round((importProgress.current / Math.max(1, importProgress.total)) * 100))}%` }} />
           </div>
         </div>
       )}
