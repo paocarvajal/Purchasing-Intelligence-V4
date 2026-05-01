@@ -80,6 +80,7 @@ export default function Processing() {
   const [groupBy, setGroupBy] = useState('uuid');
   const [archiveStatus, setArchiveStatus] = useState(state.lastImportReport?.summary || '');
   const [importReport, setImportReport] = useState(state.lastImportReport || null);
+  const activeImportReport = importReport || state.lastImportReport;
   const xmlAccept = '.xml,.XML,text/xml,application/xml';
 
   const handleFiles = useCallback(async (files) => {
@@ -375,6 +376,9 @@ export default function Processing() {
     ignored: ignoredCount,
     existing: state.items.filter((item) => item.isExisting).length,
   };
+  const importedXmlCount = activeImportReport?.xml || 0;
+  const importedUniqueUuidCount = activeImportReport?.uniqueUuids || activeImportReport?.invoiceFiles?.length || 0;
+  const hasImportMismatch = importedXmlCount > 0 && importedUniqueUuidCount > 0 && importedUniqueUuidCount !== importedXmlCount;
 
   return (
     <div className="space-y-6">
@@ -388,10 +392,37 @@ export default function Processing() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard label="Total Importado" value={`$${stats.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`} sub={`${stats.lineCount} líneas cargadas`} icon={TrendingUp} color="bg-blue-500" />
-        <StatCard label="Facturas Cargadas" value={stats.invoiceCount} sub={`${stats.visibleInvoiceCount} visibles ahora`} icon={FileText} color="bg-amber-500" />
+        <StatCard
+          label="Facturas Cargadas"
+          value={hasImportMismatch ? `${stats.invoiceCount}/${importedXmlCount}` : stats.invoiceCount}
+          sub={hasImportMismatch ? 'cargadas / XML recibidos' : `${stats.visibleInvoiceCount} visibles ahora`}
+          icon={FileText}
+          color={hasImportMismatch ? 'bg-red-500' : 'bg-amber-500'}
+        />
         <StatCard label="Pendientes Totales" value={stats.pending} sub={`${stats.visiblePending} visibles ahora`} icon={AlertTriangle} color={stats.pending > 0 ? 'bg-red-500' : 'bg-green-500'} />
         <StatCard label="Odoo Match" value={stats.existing} sub="productos existentes" icon={Calculator} color="bg-purple-500" />
       </div>
+
+      {activeImportReport && (
+        <div className={cn('rounded-2xl border p-4 shadow-xl', hasImportMismatch ? 'border-red-500/30 bg-red-500/10' : 'border-green-500/20 bg-green-500/10')}>
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div>
+              <p className={cn('text-xs font-black uppercase tracking-widest', hasImportMismatch ? 'text-red-300' : 'text-green-300')}>Ultima importacion XML</p>
+              <p className="text-sm text-slate-100 font-bold">
+                Seleccionados: {activeImportReport.selected} · XML recibidos: {activeImportReport.xml} · UUID unicos: {importedUniqueUuidCount} · Lineas nuevas: {activeImportReport.addedLines ?? activeImportReport.lines} · Fallidas: {activeImportReport.failed?.length || 0}
+              </p>
+              {hasImportMismatch && (
+                <p className="mt-1 text-xs text-red-100">
+                  Hay {importedXmlCount - importedUniqueUuidCount} XML que no terminaron como factura unica. Abre el diagnostico de abajo para ver si fueron duplicadas, fallidas o no llegaron completas desde Google Drive.
+                </p>
+              )}
+            </div>
+            <button onClick={() => setIsDropzoneExpanded(true)} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 text-xs font-black uppercase tracking-widest text-white transition-all">
+              Revisar / reimportar
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <button onClick={() => setGroupBy(groupBy === 'uuid' ? 'provider' : 'uuid')} className="glass p-4 rounded-2xl text-left hover:bg-white/5 transition-all">
@@ -467,44 +498,44 @@ export default function Processing() {
             {archiveStatus}
           </div>
         )}
-        {importReport && (
+        {activeImportReport && (
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-            <ReportPill label="Seleccionados" value={importReport.selected} />
-            <ReportPill label="XML" value={importReport.xml} />
-            <ReportPill label="Leidos" value={importReport.parsed} />
-            <ReportPill label="UUID unicos" value={importReport.uniqueUuids || importReport.invoiceFiles?.length || importReport.parsed} />
-            <ReportPill label="Lineas nuevas" value={importReport.addedLines ?? importReport.lines} />
-            <ReportPill label="Ya cargadas" value={importReport.duplicateLocal} />
-            <ReportPill label="Lineas total" value={importReport.lines} />
-            <ReportPill label="Revision" value={importReport.review} tone={importReport.review ? 'warn' : 'ok'} />
-            <ReportPill label="Fallidas" value={importReport.failed.length} tone={importReport.failed.length ? 'bad' : 'ok'} />
-            {(importReport.selected !== importReport.xml || importReport.failed.length > 0 || importReport.duplicateFiles?.length > 0 || importReport.skippedDuplicateLines > 0) && (
+            <ReportPill label="Seleccionados" value={activeImportReport.selected} />
+            <ReportPill label="XML" value={activeImportReport.xml} />
+            <ReportPill label="Leidos" value={activeImportReport.parsed} />
+            <ReportPill label="UUID unicos" value={activeImportReport.uniqueUuids || activeImportReport.invoiceFiles?.length || activeImportReport.parsed} />
+            <ReportPill label="Lineas nuevas" value={activeImportReport.addedLines ?? activeImportReport.lines} />
+            <ReportPill label="Ya cargadas" value={activeImportReport.duplicateLocal} />
+            <ReportPill label="Lineas total" value={activeImportReport.lines} />
+            <ReportPill label="Revision" value={activeImportReport.review} tone={activeImportReport.review ? 'warn' : 'ok'} />
+            <ReportPill label="Fallidas" value={activeImportReport.failed.length} tone={activeImportReport.failed.length ? 'bad' : 'ok'} />
+            {(activeImportReport.selected !== activeImportReport.xml || activeImportReport.failed.length > 0 || activeImportReport.duplicateFiles?.length > 0 || activeImportReport.skippedDuplicateLines > 0) && (
               <div className="col-span-2 md:col-span-4 xl:col-span-8 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-100">
                 <div className="flex items-center gap-2 font-black uppercase tracking-widest mb-2">
                   <AlertTriangle className="w-4 h-4" />
                   Diagnostico de importacion
                 </div>
-                {importReport.selected !== importReport.xml && (
-                  <p>El navegador recibio {importReport.selected} archivos, pero solo {importReport.xml} eran XML. Si seleccionaste mas XML en Windows, usa Importar carpeta XML o arrastra la carpeta completa.</p>
+                {activeImportReport.selected !== activeImportReport.xml && (
+                  <p>El navegador recibio {activeImportReport.selected} archivos, pero solo {activeImportReport.xml} eran XML. Si seleccionaste mas XML en Windows, usa Importar carpeta XML o arrastra la carpeta completa.</p>
                 )}
-                {importReport.skippedDuplicateLines > 0 && (
-                  <p>{importReport.skippedDuplicateLines} lineas ya existian en la sesion y no se duplicaron.</p>
+                {activeImportReport.skippedDuplicateLines > 0 && (
+                  <p>{activeImportReport.skippedDuplicateLines} lineas ya existian en la sesion y no se duplicaron.</p>
                 )}
-                {importReport.duplicateFiles?.length > 0 && (
-                  <p>{importReport.duplicateFiles.length} archivos tienen UUID ya cargado o repetido en la seleccion.</p>
+                {activeImportReport.duplicateFiles?.length > 0 && (
+                  <p>{activeImportReport.duplicateFiles.length} archivos tienen UUID ya cargado o repetido en la seleccion.</p>
                 )}
-                {importReport.failed.length > 0 && (
-                  <p>{importReport.failed.length} XML no se pudieron leer; abre Archivos no importados abajo para ver nombres y errores.</p>
+                {activeImportReport.failed.length > 0 && (
+                  <p>{activeImportReport.failed.length} XML no se pudieron leer; abre Archivos no importados abajo para ver nombres y errores.</p>
                 )}
               </div>
             )}
-            {importReport.invoiceFiles?.length > 0 && (
+            {activeImportReport.invoiceFiles?.length > 0 && (
               <details className="col-span-2 md:col-span-4 xl:col-span-8 rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-slate-300">
                 <summary className="cursor-pointer font-black uppercase tracking-widest text-blue-300">
-                  Ver archivos factura leidos ({importReport.invoiceFiles.length})
+                  Ver archivos factura leidos ({activeImportReport.invoiceFiles.length})
                 </summary>
                 <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-64 overflow-auto">
-                  {importReport.invoiceFiles.map((invoice) => (
+                  {activeImportReport.invoiceFiles.map((invoice) => (
                     <div key={`${invoice.uuid}-${invoice.file}`} className="rounded-lg bg-background/60 px-3 py-2">
                       <p className="font-mono text-slate-100 truncate">{invoice.file}</p>
                       <p className="text-slate-500">{invoice.provider} · *{invoice.uuid.slice(-12)} · {invoice.lines} lineas ({invoice.addedLines ?? invoice.lines} nuevas)</p>
@@ -513,13 +544,13 @@ export default function Processing() {
                 </div>
               </details>
             )}
-            {importReport.duplicateFiles?.length > 0 && (
+            {activeImportReport.duplicateFiles?.length > 0 && (
               <details className="col-span-2 md:col-span-4 xl:col-span-8 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-100">
                 <summary className="cursor-pointer font-black uppercase tracking-widest text-amber-300">
-                  Ver duplicadas ({importReport.duplicateFiles.length})
+                  Ver duplicadas ({activeImportReport.duplicateFiles.length})
                 </summary>
                 <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-auto">
-                  {importReport.duplicateFiles.map((duplicate) => (
+                  {activeImportReport.duplicateFiles.map((duplicate) => (
                     <div key={`${duplicate.uuid}-${duplicate.file}`} className="rounded-lg bg-background/60 px-3 py-2">
                       <p className="font-mono text-slate-100 truncate">{duplicate.file}</p>
                       <p className="text-amber-200">*{duplicate.uuid.slice(-12)} - {duplicate.reason}</p>
@@ -528,13 +559,13 @@ export default function Processing() {
                 </div>
               </details>
             )}
-            {importReport.failed.length > 0 && (
+            {activeImportReport.failed.length > 0 && (
               <div className="col-span-2 md:col-span-4 xl:col-span-8 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
                 <div className="flex items-center gap-2 font-black uppercase tracking-widest mb-2">
                   <XCircle className="w-4 h-4" />
                   Archivos no importados
                 </div>
-                {importReport.failed.slice(0, 6).map((failure) => (
+                {activeImportReport.failed.slice(0, 6).map((failure) => (
                   <p key={failure.file} className="font-mono">{failure.file}: {failure.reason}</p>
                 ))}
               </div>
