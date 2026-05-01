@@ -25,10 +25,39 @@ import { saveInvoiceWithLines } from '../core/persistence';
 import { parseInvoiceXmlWithMetadata } from '../core/xml-parser';
 import { useStore } from '../store/useStore';
 
+async function collectXmlFilesFromDirectory(directoryHandle, prefix = '') {
+  const files = [];
+
+  for await (const entry of directoryHandle.values()) {
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.kind === 'directory') {
+      files.push(...await collectXmlFilesFromDirectory(entry, path));
+      continue;
+    }
+
+    if (!entry.name.toLowerCase().endsWith('.xml')) continue;
+    const file = await entry.getFile();
+    try {
+      Object.defineProperty(file, 'relativePath', { value: path });
+    } catch {
+      file.relativePath = path;
+    }
+    files.push(file);
+  }
+
+  return files;
+}
+
+function getFileLabel(file) {
+  return file.relativePath || file.webkitRelativePath || file.name;
+}
+
 export default function Processing() {
   const {
     state,
+    addInvoice,
     addItems,
+    setLastImportReport,
     removeItem,
     deleteLine,
     clearSession,
@@ -37,6 +66,7 @@ export default function Processing() {
     selectAll,
     clearSelection,
     bulkUpdate,
+    reclassifyItems,
   } = useStore();
   const [isDragging, setIsDragging] = useState(false);
   const [search, setSearch] = useState('');
@@ -48,8 +78,8 @@ export default function Processing() {
   const [showIgnoredAudit, setShowIgnoredAudit] = useState(false);
   const [isDropzoneExpanded, setIsDropzoneExpanded] = useState(state.items.length === 0);
   const [groupBy, setGroupBy] = useState('uuid');
-  const [archiveStatus, setArchiveStatus] = useState('');
-  const [importReport, setImportReport] = useState(null);
+  const [archiveStatus, setArchiveStatus] = useState(state.lastImportReport?.summary || '');
+  const [importReport, setImportReport] = useState(state.lastImportReport || null);
   const xmlAccept = '.xml,.XML,text/xml,application/xml';
 
   const handleFiles = useCallback(async (files) => {
@@ -65,37 +95,76 @@ export default function Processing() {
       const name = file.name.toLowerCase();
       return name.endsWith('.xml') || file.type === 'text/xml' || file.type === 'application/xml';
     });
-    const existingUuids = new Set(state.items.map((item) => item.uuid));
+    const existingUuids = new Set([
+      ...Object.keys(state.invoices || {}),
+      ...state.items.map((item) => item.uuid),
+    ]);
+    const existingLineIds = new Set(state.items.map((item) => item.id));
+    const seenUuids = new Set();
     const report = {
       selected: files.length,
       xml: xmls.length,
       parsed: 0,
       added: 0,
+      addedLines: 0,
+      skippedDuplicateLines: 0,
       duplicateLocal: 0,
       duplicateCloud: 0,
+      duplicateInSelection: 0,
       saved: 0,
       localOnly: 0,
       lines: 0,
       ignored: 0,
       review: 0,
+      uniqueUuids: 0,
+      nonXmlFiles: files.length - xmls.length,
+      invoiceFiles: [],
+      duplicateFiles: [],
       failed: [],
     };
     let saved = 0;
     let duplicates = 0;
     let localOnly = 0;
     for (const file of xmls) {
+      const fileLabel = getFileLabel(file);
       try {
         const { invoice, lines, xmlText } = await parseInvoiceXmlWithMetadata(file);
+        addInvoice({ ...invoice, sourceFile: fileLabel, lineCount: lines.length });
         report.parsed += 1;
         report.lines += lines.length;
         report.ignored += lines.filter((line) => line.lineType === LINE_TYPES.IGNORE).length;
         report.review += lines.filter((line) => line.reviewStatus === 'needs_review' || line.lineType === LINE_TYPES.REVIEW).length;
-        if (existingUuids.has(invoice.uuid)) {
+        const newLines = lines.filter((line) => !existingLineIds.has(line.id));
+        const skippedLines = lines.length - newLines.length;
+        report.addedLines += newLines.length;
+        report.skippedDuplicateLines += skippedLines;
+        newLines.forEach((line) => existingLineIds.add(line.id));
+        if (seenUuids.has(invoice.uuid)) {
+          report.duplicateInSelection += 1;
+          report.duplicateFiles.push({
+            file: fileLabel,
+            uuid: invoice.uuid,
+            reason: 'UUID repetido dentro de la seleccion',
+          });
+        } else if (existingUuids.has(invoice.uuid)) {
           report.duplicateLocal += 1;
+          report.duplicateFiles.push({
+            file: fileLabel,
+            uuid: invoice.uuid,
+            reason: 'Ya estaba cargada antes de esta importacion',
+          });
         } else {
           report.added += 1;
           existingUuids.add(invoice.uuid);
         }
+        seenUuids.add(invoice.uuid);
+        report.invoiceFiles.push({
+          file: fileLabel,
+          uuid: invoice.uuid,
+          provider: invoice.provider,
+          lines: lines.length,
+          addedLines: newLines.length,
+        });
         addItems(lines);
         try {
           const result = await saveInvoiceWithLines(invoice, lines, xmlText);
@@ -113,16 +182,41 @@ export default function Processing() {
         }
       } catch (error) {
         console.error(error);
-        report.failed.push({ file: file.name, reason: error.message });
+        report.failed.push({ file: fileLabel, reason: error.message });
       }
     }
-    setImportReport(report);
+    report.uniqueUuids = new Set(report.invoiceFiles.map((invoice) => invoice.uuid)).size;
+    const summary = xmls.length > 0
+      ? `${report.parsed}/${report.xml} XML leidos. ${report.uniqueUuids} UUID unicos, ${report.added} facturas nuevas, ${report.addedLines} lineas nuevas. ${saved} archivadas en Firebase, ${duplicates} duplicadas en Firebase, ${localOnly} solo locales.`
+      : 'No encontre XML en la seleccion. Abre la carpeta sincronizada de Google Drive o usa Importar carpeta XML.';
+    const finalReport = { ...report, summary, importedAt: new Date().toISOString() };
+    setImportReport(finalReport);
+    setLastImportReport(finalReport);
     if (xmls.length > 0) {
-      setArchiveStatus(`${report.parsed}/${report.xml} XML leidos. ${report.added} facturas nuevas, ${report.duplicateLocal} ya estaban cargadas. ${saved} archivadas en Firebase, ${duplicates} duplicadas en Firebase, ${localOnly} solo locales.`);
+      setArchiveStatus(summary);
     } else if (files.length > 0) {
-      setArchiveStatus('No encontre XML en la seleccion. Abre la carpeta sincronizada de Google Drive o usa Importar carpeta XML.');
+      setArchiveStatus(summary);
     }
-  }, [addItems, state.items]);
+  }, [addInvoice, addItems, setLastImportReport, state.invoices, state.items]);
+
+  const pickXmlFolder = useCallback(async () => {
+    if ('showDirectoryPicker' in window) {
+      try {
+        const directoryHandle = await window.showDirectoryPicker();
+        const files = await collectXmlFilesFromDirectory(directoryHandle);
+        await handleFiles(files);
+        setIsDropzoneExpanded(false);
+        return;
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+        console.error(error);
+        alert(`No pude leer la carpeta: ${error.message}`);
+        return;
+      }
+    }
+
+    document.getElementById('xml-folder-input').click();
+  }, [handleFiles]);
 
   const onDrop = useCallback(async (event) => {
     event.preventDefault();
@@ -249,12 +343,37 @@ export default function Processing() {
     bulkUpdate(new Set(items.map((item) => item.id)), updates);
   };
 
+  const ignoredCount = state.items.filter((item) => item.lineType === LINE_TYPES.IGNORE).length;
+
+  const clearFilters = useCallback(() => {
+    setSearch('');
+    setFilterProv('');
+    setFilterAcct('');
+    setFilterCat('');
+    setFilterMonth('');
+    setShowOnlyPending(false);
+    setShowIgnoredAudit(ignoredCount > 0);
+  }, [ignoredCount]);
+
+  const hasActiveFilters = Boolean(search || filterProv || filterAcct || filterCat || filterMonth || showOnlyPending || (ignoredCount > 0 && !showIgnoredAudit));
+
+  const handleClearSession = useCallback(() => {
+    clearSession();
+    setImportReport(null);
+    setArchiveStatus('');
+  }, [clearSession]);
+
   const stats = {
-    total: filteredItems.reduce((acc, curr) => acc + curr.subtotal, 0),
-    count: new Set(filteredItems.map((item) => item.uuid)).size,
-    pending: filteredItems.filter((item) => item.reviewStatus === 'needs_review' || !item.account || !item.odooType).length,
-    ignored: state.items.filter((item) => item.lineType === LINE_TYPES.IGNORE).length,
-    existing: filteredItems.filter((item) => item.isExisting).length,
+    total: state.items.reduce((acc, curr) => acc + curr.subtotal, 0),
+    filteredTotal: filteredItems.reduce((acc, curr) => acc + curr.subtotal, 0),
+    invoiceCount: Math.max(Object.keys(state.invoices || {}).length, new Set(state.items.map((item) => item.uuid)).size),
+    visibleInvoiceCount: new Set(filteredItems.map((item) => item.uuid)).size,
+    lineCount: state.items.length,
+    visibleLineCount: filteredItems.length,
+    pending: state.items.filter((item) => item.reviewStatus === 'needs_review' || !item.account || !item.odooType).length,
+    visiblePending: filteredItems.filter((item) => item.reviewStatus === 'needs_review' || !item.account || !item.odooType).length,
+    ignored: ignoredCount,
+    existing: state.items.filter((item) => item.isExisting).length,
   };
 
   return (
@@ -268,9 +387,9 @@ export default function Processing() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard label="Gasto Filtrado" value={`$${stats.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`} sub={`${filteredItems.length} líneas`} icon={TrendingUp} color="bg-blue-500" />
-        <StatCard label="Facturas" value={stats.count} sub="en vista actual" icon={FileText} color="bg-amber-500" />
-        <StatCard label="Pendientes" value={stats.pending} sub="requieren revisión" icon={AlertTriangle} color={stats.pending > 0 ? 'bg-red-500' : 'bg-green-500'} onClick={() => setShowOnlyPending(!showOnlyPending)} active={showOnlyPending} />
+        <StatCard label="Total Importado" value={`$${stats.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`} sub={`${stats.lineCount} líneas cargadas`} icon={TrendingUp} color="bg-blue-500" />
+        <StatCard label="Facturas Cargadas" value={stats.invoiceCount} sub={`${stats.visibleInvoiceCount} visibles ahora`} icon={FileText} color="bg-amber-500" />
+        <StatCard label="Pendientes Totales" value={stats.pending} sub={`${stats.visiblePending} visibles ahora`} icon={AlertTriangle} color={stats.pending > 0 ? 'bg-red-500' : 'bg-green-500'} />
         <StatCard label="Odoo Match" value={stats.existing} sub="productos existentes" icon={Calculator} color="bg-purple-500" />
       </div>
 
@@ -279,9 +398,13 @@ export default function Processing() {
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Modo Vista</p>
           <p className="text-lg font-black text-white">{groupBy === 'uuid' ? 'Por Factura' : 'Por Proveedor'}</p>
         </button>
-        <button onClick={() => setShowIgnoredAudit(!showIgnoredAudit)} className={cn('glass p-4 rounded-2xl text-left hover:bg-white/5 transition-all', showIgnoredAudit && 'ring-2 ring-red-400/40')}>
+        <button
+          onClick={() => ignoredCount > 0 && setShowIgnoredAudit(!showIgnoredAudit)}
+          disabled={ignoredCount === 0}
+          className={cn('glass p-4 rounded-2xl text-left transition-all', ignoredCount > 0 && 'hover:bg-white/5', showIgnoredAudit && ignoredCount > 0 && 'ring-2 ring-red-400/40', ignoredCount === 0 && 'opacity-70 cursor-not-allowed')}
+        >
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Auditoria Ignorados</p>
-          <p className="text-lg font-black text-white">{showIgnoredAudit ? 'Visible' : 'Oculta'} - {stats.ignored} lineas</p>
+          <p className="text-lg font-black text-white">{ignoredCount > 0 ? (showIgnoredAudit ? 'Visible' : 'Oculta') : 'Sin ignorados'} - {stats.ignored} lineas</p>
         </button>
       </div>
 
@@ -317,7 +440,7 @@ export default function Processing() {
               <Upload className="w-4 h-4" />
               Elegir XML
             </button>
-            <button type="button" onClick={() => document.getElementById('xml-folder-input').click()} className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/15 text-slate-100 border border-white/10 rounded-xl text-xs font-black uppercase tracking-widest transition-all">
+            <button type="button" onClick={pickXmlFolder} className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/15 text-slate-100 border border-white/10 rounded-xl text-xs font-black uppercase tracking-widest transition-all">
               <FolderOpen className="w-4 h-4" />
               Importar carpeta XML
             </button>
@@ -326,6 +449,19 @@ export default function Processing() {
       </div>
 
       <div className="glass p-4 rounded-2xl border-white/5 space-y-4 shadow-xl">
+        {hasActiveFilters && (
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-widest text-amber-300">Vista filtrada</p>
+              <p className="text-sm text-slate-200">
+                Mostrando {stats.visibleLineCount} de {stats.lineCount} líneas y {stats.visibleInvoiceCount} de {stats.invoiceCount} facturas.
+              </p>
+            </div>
+            <button onClick={clearFilters} className="px-4 py-2 rounded-xl bg-amber-500 text-black text-xs font-black uppercase tracking-widest hover:bg-amber-400 transition-all">
+              Ver todo
+            </button>
+          </div>
+        )}
         {archiveStatus && (
           <div className="px-4 py-3 rounded-xl bg-green-500/10 border border-green-500/20 text-xs font-bold text-green-300">
             {archiveStatus}
@@ -336,11 +472,62 @@ export default function Processing() {
             <ReportPill label="Seleccionados" value={importReport.selected} />
             <ReportPill label="XML" value={importReport.xml} />
             <ReportPill label="Leidos" value={importReport.parsed} />
-            <ReportPill label="Nuevas" value={importReport.added} />
+            <ReportPill label="UUID unicos" value={importReport.uniqueUuids || importReport.invoiceFiles?.length || importReport.parsed} />
+            <ReportPill label="Lineas nuevas" value={importReport.addedLines ?? importReport.lines} />
             <ReportPill label="Ya cargadas" value={importReport.duplicateLocal} />
-            <ReportPill label="Lineas" value={importReport.lines} />
+            <ReportPill label="Lineas total" value={importReport.lines} />
             <ReportPill label="Revision" value={importReport.review} tone={importReport.review ? 'warn' : 'ok'} />
             <ReportPill label="Fallidas" value={importReport.failed.length} tone={importReport.failed.length ? 'bad' : 'ok'} />
+            {(importReport.selected !== importReport.xml || importReport.failed.length > 0 || importReport.duplicateFiles?.length > 0 || importReport.skippedDuplicateLines > 0) && (
+              <div className="col-span-2 md:col-span-4 xl:col-span-8 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-100">
+                <div className="flex items-center gap-2 font-black uppercase tracking-widest mb-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  Diagnostico de importacion
+                </div>
+                {importReport.selected !== importReport.xml && (
+                  <p>El navegador recibio {importReport.selected} archivos, pero solo {importReport.xml} eran XML. Si seleccionaste mas XML en Windows, usa Importar carpeta XML o arrastra la carpeta completa.</p>
+                )}
+                {importReport.skippedDuplicateLines > 0 && (
+                  <p>{importReport.skippedDuplicateLines} lineas ya existian en la sesion y no se duplicaron.</p>
+                )}
+                {importReport.duplicateFiles?.length > 0 && (
+                  <p>{importReport.duplicateFiles.length} archivos tienen UUID ya cargado o repetido en la seleccion.</p>
+                )}
+                {importReport.failed.length > 0 && (
+                  <p>{importReport.failed.length} XML no se pudieron leer; abre Archivos no importados abajo para ver nombres y errores.</p>
+                )}
+              </div>
+            )}
+            {importReport.invoiceFiles?.length > 0 && (
+              <details className="col-span-2 md:col-span-4 xl:col-span-8 rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-slate-300">
+                <summary className="cursor-pointer font-black uppercase tracking-widest text-blue-300">
+                  Ver archivos factura leidos ({importReport.invoiceFiles.length})
+                </summary>
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-64 overflow-auto">
+                  {importReport.invoiceFiles.map((invoice) => (
+                    <div key={`${invoice.uuid}-${invoice.file}`} className="rounded-lg bg-background/60 px-3 py-2">
+                      <p className="font-mono text-slate-100 truncate">{invoice.file}</p>
+                      <p className="text-slate-500">{invoice.provider} · *{invoice.uuid.slice(-12)} · {invoice.lines} lineas ({invoice.addedLines ?? invoice.lines} nuevas)</p>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+            {importReport.duplicateFiles?.length > 0 && (
+              <details className="col-span-2 md:col-span-4 xl:col-span-8 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-100">
+                <summary className="cursor-pointer font-black uppercase tracking-widest text-amber-300">
+                  Ver duplicadas ({importReport.duplicateFiles.length})
+                </summary>
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-auto">
+                  {importReport.duplicateFiles.map((duplicate) => (
+                    <div key={`${duplicate.uuid}-${duplicate.file}`} className="rounded-lg bg-background/60 px-3 py-2">
+                      <p className="font-mono text-slate-100 truncate">{duplicate.file}</p>
+                      <p className="text-amber-200">*{duplicate.uuid.slice(-12)} - {duplicate.reason}</p>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
             {importReport.failed.length > 0 && (
               <div className="col-span-2 md:col-span-4 xl:col-span-8 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
                 <div className="flex items-center gap-2 font-black uppercase tracking-widest mb-2">
@@ -378,10 +565,22 @@ export default function Processing() {
           <button onClick={() => setShowOnlyPending(!showOnlyPending)} className={cn('px-4 py-2 rounded-xl text-xs font-bold transition-all border', showOnlyPending ? 'bg-red-500 text-white border-red-500 shadow-lg shadow-red-500/20' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10')}>
             Solo Pendientes
           </button>
-          <button onClick={() => setShowIgnoredAudit(!showIgnoredAudit)} className={cn('px-4 py-2 rounded-xl text-xs font-bold transition-all border', showIgnoredAudit ? 'bg-red-500 text-white border-red-500 shadow-lg shadow-red-500/20' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10')}>
+          <button
+            onClick={() => ignoredCount > 0 && setShowIgnoredAudit(!showIgnoredAudit)}
+            disabled={ignoredCount === 0}
+            className={cn('px-4 py-2 rounded-xl text-xs font-bold transition-all border', showIgnoredAudit && ignoredCount > 0 ? 'bg-red-500 text-white border-red-500 shadow-lg shadow-red-500/20' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10', ignoredCount === 0 && 'opacity-50 cursor-not-allowed hover:bg-white/5')}
+          >
             Auditoria Ignorados
           </button>
-          <button onClick={clearSession} className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/50 rounded-xl transition-all">
+          <button onClick={reclassifyItems} className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/10 hover:bg-blue-500 text-blue-300 hover:text-white border border-blue-500/50 rounded-xl transition-all">
+            <RefreshCcw className="w-4 h-4" />
+            <span className="text-xs font-bold">Recalcular</span>
+          </button>
+          <button onClick={clearFilters} className="flex items-center gap-2 px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500 text-amber-300 hover:text-black border border-amber-500/50 rounded-xl transition-all">
+            <RefreshCcw className="w-4 h-4" />
+            <span className="text-xs font-bold">Ver Todo</span>
+          </button>
+          <button onClick={handleClearSession} className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/50 rounded-xl transition-all">
             <RefreshCcw className="w-4 h-4" />
             <span className="text-xs font-bold">Limpiar Todo</span>
           </button>

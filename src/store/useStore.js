@@ -21,6 +21,7 @@ const DEFAULT_MASTER_DATA = {
 };
 
 let globalState = {
+  invoices: {},
   items: [],
   sessionUuids: [],
   dests: [
@@ -33,6 +34,7 @@ let globalState = {
   providerMetadata: {}, // rfc -> { activity: string, email: string, phone: string }
   supplierRules: DEFAULT_SUPPLIER_RULES,
   masterData: DEFAULT_MASTER_DATA,
+  lastImportReport: null,
   syncLog: [],
 };
 
@@ -87,7 +89,7 @@ function findCatalogMatch(line, masterData, purchaseSku) {
   return null;
 }
 
-function enrichLine(line, state) {
+function enrichLine(line, state, options = {}) {
   const ruleClassification = classifyLine({
     description: line.description,
     satCode: line.satCode,
@@ -95,7 +97,9 @@ function enrichLine(line, state) {
     rfc: line.rfc,
     supplierRules: state.supplierRules,
   });
-  const shouldApplyRuleClassification = ruleClassification.lineType === 'ignore'
+  const shouldApplyRuleClassification = options.forceClassification
+    || !line.manuallyReviewed
+    || ruleClassification.lineType === 'ignore'
     || ruleClassification.reason?.startsWith('Supplier rule');
   const purchaseSku = buildPurchaseSku({
     sku: line.skuOriginal,
@@ -127,8 +131,8 @@ function enrichLine(line, state) {
   };
 }
 
-function enrichItems(items, state) {
-  return items.map((item) => enrichLine(item, state));
+function enrichItems(items, state, options = {}) {
+  return items.map((item) => enrichLine(item, state, options));
 }
 
 const setState = (next) => {
@@ -149,8 +153,8 @@ export function useStore() {
 
   const addItems = useCallback((newItems) => {
     setState(prev => {
-      const existingUuids = new Set(prev.items.map(i => i.uuid));
-      const filtered = enrichItems(newItems.filter(i => !existingUuids.has(i.uuid)), prev);
+      const existingIds = new Set(prev.items.map(i => i.id));
+      const filtered = enrichItems(newItems.filter(i => !existingIds.has(i.id)), prev);
       const addedUuids = [...new Set(filtered.map(i => i.uuid))];
       return {
         ...prev,
@@ -160,17 +164,39 @@ export function useStore() {
     });
   }, []);
 
+  const addInvoice = useCallback((invoice) => {
+    setState(prev => ({
+      ...prev,
+      invoices: {
+        ...(prev.invoices || {}),
+        [invoice.uuid]: {
+          ...(prev.invoices?.[invoice.uuid] || {}),
+          ...invoice,
+          importedAt: prev.invoices?.[invoice.uuid]?.importedAt || new Date().toISOString(),
+        },
+      },
+      sessionUuids: [...new Set([...prev.sessionUuids, invoice.uuid])],
+    }));
+  }, []);
+
+  const setLastImportReport = useCallback((report) => {
+    setState(prev => ({
+      ...prev,
+      lastImportReport: report,
+    }));
+  }, []);
+
   const updateItem = useCallback((id, updates) => {
     setState(prev => ({
       ...prev,
-      items: prev.items.map(i => i.id === id ? { ...i, ...updates } : i)
+      items: prev.items.map(i => i.id === id ? { ...i, ...updates, manuallyReviewed: true } : i)
     }));
   }, []);
 
   const bulkUpdate = useCallback((ids, updates) => {
     setState(prev => ({
       ...prev,
-      items: prev.items.map(i => ids.has(i.id) ? { ...i, ...updates } : i)
+      items: prev.items.map(i => ids.has(i.id) ? { ...i, ...updates, manuallyReviewed: true } : i)
     }));
   }, []);
 
@@ -216,10 +242,12 @@ export function useStore() {
     if (confirm('¿Seguro que quieres borrar TODA la información cargada? No se puede deshacer.')) {
       setState(prev => ({
         ...prev,
+        invoices: {},
         items: [],
         sessionUuids: [],
         itemDests: {},
-        selectedIds: new Set()
+        selectedIds: new Set(),
+        lastImportReport: null,
       }));
     }
   }, []);
@@ -306,9 +334,18 @@ export function useStore() {
     });
   }, []);
 
+  const reclassifyItems = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      items: enrichItems(prev.items.map(item => ({ ...item, manuallyReviewed: false })), prev, { forceClassification: true }),
+    }));
+  }, []);
+
   return {
     state,
+    addInvoice,
     addItems,
+    setLastImportReport,
     updateItem,
     bulkUpdate,
     setItemDest,
@@ -322,6 +359,7 @@ export function useStore() {
     importMasterData,
     replaceMasterData,
     upsertSupplierRule,
-    deleteSupplierRule
+    deleteSupplierRule,
+    reclassifyItems
   };
 }

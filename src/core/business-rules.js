@@ -158,5 +158,5 @@ export function classifyLine({ description, satCode, provider, rfc, supplierRule
     return { lineType: LINE_TYPES.EXPENSE, odooType: 'Gasto Operativo', reason: 'Store supply keyword match.' };
   }
 
-  return { lineType: LINE_TYPES.REVIEW, odooType: 'Revisar', reason: 'No confident rule matched.' };
+  return { lineType: LINE_TYPES.INVENTORY, odooType: 'Inventario', reason: 'Default merchandise classification.' };
 }
