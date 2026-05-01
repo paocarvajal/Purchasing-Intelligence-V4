@@ -1,106 +1,162 @@
-/**
- * XML Parser for HerraMax V4
- * "Deep Extraction" mode: RFC, Email, Phone, Zip, and Regime.
- */
-import { suggestCategory, suggestAccount, calculateMarkup, calculateSalesPrice, shieldSKU } from './odoo-logic';
+import { suggestCategory, suggestAccount, calculateMarkup, calculateSalesPrice } from './odoo-logic';
+import { buildPurchaseSku, classifyLine, normalizeRfc, normalizeSku } from './business-rules';
+
+const CFDI_NAMESPACES = [
+  'http://www.sat.gob.mx/cfd/4',
+  'http://www.sat.gob.mx/cfd/3',
+];
+
+const TFD_NAMESPACE = 'http://www.sat.gob.mx/TimbreFiscalDigital';
+
+function getAttr(node, name, fallback = '') {
+  if (!node) return fallback;
+  return node.getAttribute(name) || node.getAttribute(name.toLowerCase()) || fallback;
+}
+
+function firstNode(xml, localName, namespaceUris = []) {
+  const direct = xml.querySelector(localName);
+  if (direct) return direct;
+
+  for (const namespaceUri of namespaceUris) {
+    const node = xml.getElementsByTagNameNS(namespaceUri, localName)[0];
+    if (node) return node;
+  }
+
+  return Array.from(xml.getElementsByTagName('*')).find((node) => node.localName === localName) || null;
+}
+
+function allNodes(xml, localName, namespaceUris = []) {
+  const direct = Array.from(xml.querySelectorAll(localName));
+  if (direct.length > 0) return direct;
+
+  for (const namespaceUri of namespaceUris) {
+    const nodes = Array.from(xml.getElementsByTagNameNS(namespaceUri, localName));
+    if (nodes.length > 0) return nodes;
+  }
+
+  return Array.from(xml.getElementsByTagName('*')).filter((node) => node.localName === localName);
+}
+
+function parseNumber(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function extractEmail(text) {
+  const emailMatches = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
+  if (!emailMatches) return '';
+  return emailMatches.find((email) => !email.includes('sat.gob.mx') && !email.includes('w3.org')) || '';
+}
+
+function extractPhone(text) {
+  const phoneMatches = text.match(/(?:\+?52\s?)?(?:\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}/g);
+  if (!phoneMatches) return '';
+  return phoneMatches.find((phone) => {
+    const digits = phone.replace(/\D/g, '');
+    return digits.length === 10 && !digits.startsWith('0000');
+  }) || '';
+}
 
 export async function parseInvoiceXml(file) {
-    const text = await file.text();
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(text, "application/xml");
+  const text = await file.text();
+  const parser = new DOMParser();
+  const xml = parser.parseFromString(text, 'application/xml');
+  const parserError = xml.querySelector('parsererror');
 
-    const ns = {
-        cfdi: "http://www.sat.gob.mx/cfd/4",
-        cfdi3: "http://www.sat.gob.mx/cfd/3",
-        tfd: "http://www.sat.gob.mx/TimbreFiscalDigital"
+  if (parserError) {
+    throw new Error(`XML inválido: ${file.name}`);
+  }
+
+  const comp = firstNode(xml, 'Comprobante', CFDI_NAMESPACES) || xml.documentElement;
+  const emisorNode = firstNode(xml, 'Emisor', CFDI_NAMESPACES);
+  const receptorNode = firstNode(xml, 'Receptor', CFDI_NAMESPACES);
+  const tfd = firstNode(xml, 'TimbreFiscalDigital', [TFD_NAMESPACE]);
+  const conceptNodes = allNodes(xml, 'Concepto', CFDI_NAMESPACES);
+
+  const provider = getAttr(emisorNode, 'Nombre', 'Proveedor Desconocido').toUpperCase().trim();
+  let rfc = normalizeRfc(getAttr(emisorNode, 'Rfc'));
+  const regimen = getAttr(emisorNode, 'RegimenFiscal');
+  const cp = getAttr(comp, 'LugarExpedicion');
+  const email = extractEmail(text).toLowerCase().trim();
+  const phone = extractPhone(text).trim();
+
+  if (!rfc) {
+    const rfcMatch = text.match(/[A-Z&Ñ]{3,4}[0-9]{2}(0[1-9]|1[012])(0[1-9]|[12][0-9]|3[01])[A-Z0-9]{2}[0-9A]/i);
+    rfc = normalizeRfc(rfcMatch ? rfcMatch[0] : '');
+  }
+
+  const uuid = getAttr(tfd, 'UUID') || `MANUAL-${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+  const fecha = getAttr(comp, 'Fecha').substring(0, 10);
+  const invoice = {
+    uuid,
+    fecha,
+    provider,
+    rfc,
+    receiverRfc: normalizeRfc(getAttr(receptorNode, 'Rfc')),
+    subtotal: parseNumber(getAttr(comp, 'SubTotal')),
+    total: parseNumber(getAttr(comp, 'Total')),
+    currency: getAttr(comp, 'Moneda', 'MXN'),
+    cp,
+    regimen,
+    email,
+    phone,
+    sourceFile: file.name,
+  };
+
+  const lines = conceptNodes.map((node, index) => {
+    const description = getAttr(node, 'Descripcion').toUpperCase().trim();
+    const skuOriginal = normalizeSku(getAttr(node, 'NoIdentificacion')) || 'S/SKU';
+    const cost = parseNumber(getAttr(node, 'ValorUnitario'));
+    const quantity = parseNumber(getAttr(node, 'Cantidad'));
+    const subtotal = parseNumber(getAttr(node, 'Importe')) || cost * quantity;
+    const satCode = getAttr(node, 'ClaveProdServ');
+    const classification = classifyLine({ description, satCode, provider, rfc });
+    const purchaseSku = buildPurchaseSku({ sku: skuOriginal, description, provider, rfc });
+    const markup = calculateMarkup(description);
+
+    return {
+      id: `${uuid}-${index}`,
+      uuid,
+      fecha,
+      provider,
+      rfc,
+      email,
+      phone,
+      cp,
+      regimen,
+      skuOriginal,
+      skuShielded: purchaseSku,
+      purchaseSku,
+      canonicalSku: skuOriginal,
+      description,
+      satCode,
+      unitCode: getAttr(node, 'ClaveUnidad'),
+      unitName: getAttr(node, 'Unidad'),
+      cost,
+      quantity,
+      qty: quantity,
+      subtotal,
+      category: suggestCategory(description),
+      account: suggestAccount(description),
+      markup,
+      suggestedPrice: calculateSalesPrice(cost, markup),
+      isExisting: false,
+      reviewStatus: classification.lineType === 'review' ? 'needs_review' : 'ready',
+      ...classification,
     };
+  });
 
-    try {
-        const comp = xml.querySelector('Comprobante') || 
-                     xml.getElementsByTagNameNS(ns.cfdi, 'Comprobante')[0] || 
-                     xml.getElementsByTagNameNS(ns.cfdi3, 'Comprobante')[0] ||
-                     xml.documentElement;
-        
-        const emisorNode = xml.querySelector('Emisor') || 
-                           xml.getElementsByTagNameNS(ns.cfdi, 'Emisor')[0] || 
-                           xml.getElementsByTagNameNS(ns.cfdi3, 'Emisor')[0];
-        
-        let emisorName = 'Proveedor Desconocido';
-        let rfc = '';
-        let email = '';
-        let phone = '';
-        let cp = '';
-        let regimen = '';
-
-        if (emisorNode) {
-            emisorName = emisorNode.getAttribute('Nombre') || emisorNode.getAttribute('nombre') || 'Proveedor Desconocido';
-            rfc = emisorNode.getAttribute('Rfc') || emisorNode.getAttribute('rfc') || '';
-            regimen = emisorNode.getAttribute('RegimenFiscal') || '';
-        }
-
-        // Location Info (LugarExpedicion is the CP of the issuer in many cases)
-        cp = comp.getAttribute('LugarExpedicion') || '';
-
-        if (!rfc) {
-            const rfcMatch = text.match(/[A-Z&Ñ]{3,4}[0-9]{2}(0[1-9]|1[012])(0[1-9]|[12][0-9]|3[01])[A-Z0-9]{2}[0-9A]/i);
-            rfc = rfcMatch ? rfcMatch[0] : '';
-        }
-
-        const emailMatches = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g);
-        if (emailMatches) {
-            const realEmails = emailMatches.filter(e => !e.includes('sat.gob.mx') && !e.includes('w3.org'));
-            if (realEmails.length > 0) email = realEmails[0];
-        }
-
-        const phoneMatches = text.match(/(?:\+?52\s?)?(?:\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}/g);
-        if (phoneMatches) {
-            const realPhones = phoneMatches.filter(p => {
-                const digits = p.replace(/\D/g, '');
-                return digits.length === 10 && !digits.startsWith('0000');
-            });
-            if (realPhones.length > 0) phone = realPhones[0];
-        }
-
-        const fechaAttr = Array.from(comp.attributes).find(a => a.name.toLowerCase() === 'fecha');
-        const fecha = (fechaAttr ? fechaAttr.value : '').substring(0, 10);
-        
-        const tfd = xml.querySelector('TimbreFiscalDigital') || 
-                    xml.getElementsByTagNameNS(ns.tfd, 'TimbreFiscalDigital')[0];
-        const uuid = tfd?.getAttribute('UUID') || tfd?.getAttribute('uuid') || `MANUAL-${Math.random().toString(36).substr(2, 9)}`;
-
-        const conceptNodes = Array.from(xml.querySelectorAll('Concepto')) || 
-                             Array.from(xml.getElementsByTagNameNS(ns.cfdi, 'Concepto')) || 
-                             Array.from(xml.getElementsByTagNameNS(ns.cfdi3, 'Concepto'));
-
-        return conceptNodes.map((node, index) => {
-            const desc = node.getAttribute('Descripcion') || node.getAttribute('descripcion') || '';
-            const cost = parseFloat(node.getAttribute('ValorUnitario') || node.getAttribute('valorUnitario') || 0);
-            const qty = parseFloat(node.getAttribute('Cantidad') || node.getAttribute('cantidad') || 0);
-            
-            return {
-                id: `${uuid}-${index}`,
-                uuid,
-                fecha,
-                provider: emisorName.toUpperCase().trim(),
-                rfc: (rfc || '').toUpperCase().trim(),
-                email: email.toLowerCase().trim(),
-                phone: phone.trim(),
-                cp,
-                regimen,
-                skuOriginal: node.getAttribute('NoIdentificacion') || 'S/SKU',
-                skuShielded: shieldSKU(node.getAttribute('NoIdentificacion'), desc, emisorName),
-                description: desc.toUpperCase().trim(),
-                cost,
-                qty,
-                subtotal: cost * qty,
-                category: suggestCategory(desc),
-                account: suggestAccount(desc),
-                markup: calculateMarkup(desc),
-                suggestedPrice: calculateSalesPrice(cost, calculateMarkup(desc)),
-                odooType: 'Gasto Operativo'
-            };
-        });
-    } catch (error) {
-        throw error;
-    }
+  lines.invoice = invoice;
+  lines.xmlText = text;
+  return lines;
 }
+
+export async function parseInvoiceXmlWithMetadata(file) {
+  const lines = await parseInvoiceXml(file);
+  return {
+    invoice: lines.invoice,
+    lines,
+    xmlText: lines.xmlText,
+  };
+}
+

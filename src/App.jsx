@@ -4,14 +4,18 @@ import {
   Settings, 
   BarChart3, 
   Box, 
+  Database,
   LogOut, 
   LogIn,
   ShieldCheck,
+  SlidersHorizontal,
   Zap
 } from 'lucide-react';
 import Processing from './views/Processing';
 import Providers from './views/Providers';
 import Labels from './views/Labels';
+import MasterData from './views/MasterData';
+import SupplierRules from './views/SupplierRules';
 import { auth, loginWithGoogle, logout } from './core/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -88,6 +92,18 @@ export default function App() {
             label="Invoices"
           />
           <NavButton 
+            active={activeTab === 'master'} 
+            onClick={() => setActiveTab('master')}
+            icon={<Database />}
+            label="Odoo Data"
+          />
+          <NavButton 
+            active={activeTab === 'rules'} 
+            onClick={() => setActiveTab('rules')}
+            icon={<SlidersHorizontal />}
+            label="Rules"
+          />
+          <NavButton 
             active={activeTab === 'providers'} 
             onClick={() => setActiveTab('providers')}
             icon={<Settings />}
@@ -138,6 +154,8 @@ export default function App() {
 
         <div className="p-8 max-w-[1600px] mx-auto animate-fade-in">
           {activeTab === 'processing' && <Processing />}
+          {activeTab === 'master' && <MasterData />}
+          {activeTab === 'rules' && <SupplierRules />}
           {activeTab === 'providers' && <Providers />}
           {activeTab === 'labels' && <Labels />}
         </div>

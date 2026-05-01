@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAa57ppjWFUcEdniw9WScABHssyACP3x3k",
@@ -15,6 +16,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
 
 export const loginWithGoogle = async () => {
@@ -22,6 +24,10 @@ export const loginWithGoogle = async () => {
         const result = await signInWithPopup(auth, googleProvider);
         return result.user;
     } catch (error) {
+        if (error.code === "auth/popup-blocked" || error.code === "auth/cancelled-popup-request") {
+            await signInWithRedirect(auth, googleProvider);
+            return null;
+        }
         console.error("Error logging in with Google:", error);
         return null;
     }

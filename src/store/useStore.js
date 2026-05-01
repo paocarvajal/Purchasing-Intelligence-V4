@@ -1,8 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
+import {
+  DEFAULT_SUPPLIER_RULES,
+  buildPurchaseSku,
+  classifyLine,
+  isTruperBrand,
+  normalizeRfc,
+  normalizeSku,
+} from '../core/business-rules';
 
 /**
  * Global Store for HerraMax V4
  */
+
+const DEFAULT_MASTER_DATA = {
+  productTemplates: {},
+  productVariants: {},
+  partners: {},
+  accounts: {},
+  imports: [],
+};
 
 let globalState = {
   items: [],
@@ -15,22 +31,109 @@ let globalState = {
   itemDests: {}, // uuid -> destId
   selectedIds: new Set(),
   providerMetadata: {}, // rfc -> { activity: string, email: string, phone: string }
+  supplierRules: DEFAULT_SUPPLIER_RULES,
+  masterData: DEFAULT_MASTER_DATA,
+  syncLog: [],
 };
 
 const stored = localStorage.getItem('hm_v4_store');
 if (stored) {
   try {
     const parsed = JSON.parse(stored);
-    globalState = { ...globalState, ...parsed, selectedIds: new Set() };
-  } catch (e) {}
+    globalState = {
+      ...globalState,
+      ...parsed,
+      selectedIds: new Set(),
+      supplierRules: parsed.supplierRules?.length ? parsed.supplierRules : DEFAULT_SUPPLIER_RULES,
+      masterData: { ...DEFAULT_MASTER_DATA, ...(parsed.masterData || {}) },
+      syncLog: parsed.syncLog || [],
+    };
+  } catch {
+    localStorage.removeItem('hm_v4_store');
+  }
 }
 
 const listeners = new Set();
 
+function indexRecords(records) {
+  return records.reduce((acc, record) => {
+    if (record?.id) acc[record.id] = record;
+    return acc;
+  }, {});
+}
+
+function findCatalogMatch(line, masterData, purchaseSku) {
+  const truper = isTruperBrand(line.provider, line.description);
+  const baseSku = normalizeSku(line.skuOriginal);
+  const canonicalSku = normalizeSku(line.canonicalSku);
+  const generatedSku = normalizeSku(purchaseSku);
+  const candidates = truper
+    ? [baseSku, canonicalSku, generatedSku]
+    : [generatedSku, canonicalSku, baseSku];
+
+  for (const candidate of candidates.filter(Boolean)) {
+    const template = masterData.productTemplates[candidate];
+    const variant = masterData.productVariants[candidate];
+    if (template || variant) {
+      return {
+        id: candidate,
+        template,
+        variant,
+        record: { ...(template || {}), ...(variant || {}) },
+      };
+    }
+  }
+
+  return null;
+}
+
+function enrichLine(line, state) {
+  const ruleClassification = classifyLine({
+    description: line.description,
+    satCode: line.satCode,
+    provider: line.provider,
+    rfc: line.rfc,
+    supplierRules: state.supplierRules,
+  });
+  const shouldApplyRuleClassification = ruleClassification.lineType === 'ignore'
+    || ruleClassification.reason?.startsWith('Supplier rule');
+  const purchaseSku = buildPurchaseSku({
+    sku: line.skuOriginal,
+    description: line.description,
+    provider: line.provider,
+    rfc: line.rfc,
+    supplierRules: state.supplierRules,
+  });
+  const match = findCatalogMatch(line, state.masterData, purchaseSku);
+  const truper = isTruperBrand(line.provider, line.description);
+  const catalogStock = Number(match?.record?.stock || match?.record?.available || 0);
+  const canonicalSku = match?.record?.canonicalSku || match?.record?.internalRef || (truper ? normalizeSku(line.skuOriginal) : purchaseSku);
+
+  return {
+    ...line,
+    ...(shouldApplyRuleClassification ? ruleClassification : {}),
+    reviewStatus: shouldApplyRuleClassification && ruleClassification.lineType !== 'review' ? 'ready' : line.reviewStatus,
+    purchaseSku,
+    skuShielded: purchaseSku,
+    canonicalSku,
+    isExisting: Boolean(match),
+    catalogName: match?.record?.name || match?.record?.displayName || '',
+    catalogStock,
+    catalogSource: match?.record?.source || '',
+    productStatus: match ? 'existing' : 'new',
+    skuRole: truper ? 'canonical' : 'purchase',
+    ecommerceEligible: truper && Boolean(match) && catalogStock > 0,
+  };
+}
+
+function enrichItems(items, state) {
+  return items.map((item) => enrichLine(item, state));
+}
+
 const setState = (next) => {
   globalState = typeof next === 'function' ? next(globalState) : { ...globalState, ...next };
   // Filter out non-serializable items for storage
-  const { selectedIds, ...toStore } = globalState;
+  const { selectedIds: _selectedIds, ...toStore } = globalState;
   localStorage.setItem('hm_v4_store', JSON.stringify(toStore));
   listeners.forEach(l => l(globalState));
 };
@@ -46,7 +149,7 @@ export function useStore() {
   const addItems = useCallback((newItems) => {
     setState(prev => {
       const existingUuids = new Set(prev.items.map(i => i.uuid));
-      const filtered = newItems.filter(i => !existingUuids.has(i.uuid));
+      const filtered = enrichItems(newItems.filter(i => !existingUuids.has(i.uuid)), prev);
       const addedUuids = [...new Set(filtered.map(i => i.uuid))];
       return {
         ...prev,
@@ -110,13 +213,13 @@ export function useStore() {
 
   const clearSession = useCallback(() => {
     if (confirm('¿Seguro que quieres borrar TODA la información cargada? No se puede deshacer.')) {
-      setState({
+      setState(prev => ({
+        ...prev,
         items: [],
         sessionUuids: [],
         itemDests: {},
         selectedIds: new Set()
-      });
-      localStorage.removeItem('hm_v4_store');
+      }));
     }
   }, []);
 
@@ -125,9 +228,81 @@ export function useStore() {
       ...prev,
       providerMetadata: {
         ...prev.providerMetadata,
-        [rfc]: { ...(prev.providerMetadata[rfc] || {}), ...updates }
+        [normalizeRfc(rfc)]: { ...(prev.providerMetadata[normalizeRfc(rfc)] || {}), ...updates }
       }
     }));
+  }, []);
+
+  const importMasterData = useCallback((type, records, importInfo = {}) => {
+    setState(prev => {
+      const masterData = {
+        ...prev.masterData,
+        [type]: {
+          ...(prev.masterData[type] || {}),
+          ...indexRecords(records),
+        },
+        imports: [
+          {
+            id: `${type}-${Date.now()}`,
+            type,
+            count: records.length,
+            skipped: importInfo.skipped || 0,
+            sourceFile: importInfo.sourceFile || '',
+            savedToCloud: Boolean(importInfo.savedToCloud),
+            importedAt: new Date().toISOString(),
+          },
+          ...(prev.masterData.imports || []),
+        ].slice(0, 20),
+      };
+      const nextState = { ...prev, masterData };
+      return {
+        ...nextState,
+        items: enrichItems(prev.items, nextState),
+      };
+    });
+  }, []);
+
+  const replaceMasterData = useCallback((nextMasterData) => {
+    setState(prev => {
+      const masterData = { ...DEFAULT_MASTER_DATA, ...nextMasterData };
+      const nextState = { ...prev, masterData };
+      return {
+        ...nextState,
+        items: enrichItems(prev.items, nextState),
+      };
+    });
+  }, []);
+
+  const upsertSupplierRule = useCallback((rule) => {
+    setState(prev => {
+      const normalizedRule = {
+        ...rule,
+        rfc: normalizeRfc(rule.rfc),
+        match: Array.isArray(rule.match) ? rule.match : String(rule.match || '').split(',').map(value => value.trim()).filter(Boolean),
+      };
+      const exists = prev.supplierRules.some(existing => existing.key === normalizedRule.key);
+      const supplierRules = exists
+        ? prev.supplierRules.map(existing => existing.key === normalizedRule.key ? normalizedRule : existing)
+        : [normalizedRule, ...prev.supplierRules];
+      const nextState = { ...prev, supplierRules };
+      return {
+        ...nextState,
+        items: enrichItems(prev.items, nextState),
+      };
+    });
+  }, []);
+
+  const deleteSupplierRule = useCallback((key) => {
+    setState(prev => {
+      const nextState = {
+        ...prev,
+        supplierRules: prev.supplierRules.filter(rule => rule.key !== key),
+      };
+      return {
+        ...nextState,
+        items: enrichItems(prev.items, nextState),
+      };
+    });
   }, []);
 
   return {
@@ -142,6 +317,10 @@ export function useStore() {
     removeItem,
     deleteLine,
     clearSession,
-    updateProviderMetadata
+    updateProviderMetadata,
+    importMasterData,
+    replaceMasterData,
+    upsertSupplierRule,
+    deleteSupplierRule
   };
 }
