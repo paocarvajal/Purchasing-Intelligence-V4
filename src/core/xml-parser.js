@@ -137,7 +137,7 @@ export async function parseInvoiceXml(file) {
       qty: quantity,
       subtotal,
       category: suggestCategory(description),
-      account: suggestAccount(description),
+      account: classification.lineType === 'review' || classification.lineType === 'ignore' ? '' : suggestAccount(description),
       markup,
       suggestedPrice: calculateSalesPrice(cost, markup),
       isExisting: false,
@@ -159,4 +159,3 @@ export async function parseInvoiceXmlWithMetadata(file) {
     xmlText: lines.xmlText,
   };
 }
-

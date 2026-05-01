@@ -16,15 +16,21 @@ import Providers from './views/Providers';
 import Labels from './views/Labels';
 import MasterData from './views/MasterData';
 import SupplierRules from './views/SupplierRules';
-import { auth, loginWithGoogle, logout } from './core/firebase';
+import { auth, firebaseProject, loginWithGoogle, logout, readRedirectLoginResult } from './core/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('processing');
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
 
   useEffect(() => {
+    readRedirectLoginResult().catch((error) => {
+      setAuthError(formatAuthError(error));
+      setLoading(false);
+    });
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoading(false);
@@ -33,7 +39,22 @@ export default function App() {
   }, []);
 
   const handleLogin = async () => {
-    await loginWithGoogle();
+    setAuthError('');
+    try {
+      await loginWithGoogle();
+    } catch (error) {
+      setAuthError(formatAuthError(error));
+    }
+  };
+
+  const handleLocalSandbox = () => {
+    setAuthError('');
+    setUser({
+      email: 'local-sandbox@herramax.dev',
+      displayName: 'Local Sandbox',
+      photoURL: `${import.meta.env.BASE_URL}logo.png`,
+      isLocalSandbox: true,
+    });
   };
 
   if (loading) {
@@ -66,6 +87,30 @@ export default function App() {
           <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
           ACCEDER CON GMAIL
         </button>
+
+        {authError && (
+          <div className="max-w-xl text-left glass rounded-2xl p-5 border-red-500/30 bg-red-500/10 space-y-3">
+            <p className="text-sm font-black text-red-300 uppercase tracking-widest">Firebase Auth error</p>
+            <p className="text-sm text-red-100">{authError}</p>
+            <div className="text-xs text-slate-300 space-y-1">
+              <p>Project: <span className="font-mono text-white">{firebaseProject.projectId}</span></p>
+              <p>Auth domain: <span className="font-mono text-white">{firebaseProject.authDomain}</span></p>
+              <p>Current host: <span className="font-mono text-white">{window.location.host}</span></p>
+            </div>
+            <p className="text-xs text-slate-400">
+              In Firebase Console, add this host under Authentication / Settings / Authorized domains.
+            </p>
+          </div>
+        )}
+
+        {isLocalDevelopment() && (
+          <button
+            onClick={handleLocalSandbox}
+            className="px-6 py-3 rounded-xl border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 text-xs font-black uppercase tracking-widest transition-all"
+          >
+            Entrar en modo local sandbox
+          </button>
+        )}
         
         <p className="text-[10px] text-slate-600 font-bold tracking-widest uppercase">
           Proyectos Antigravity &copy; 2026
@@ -162,6 +207,16 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function formatAuthError(error) {
+  const code = error?.code || 'auth/unknown';
+  const message = error?.message || 'Firebase did not return a detailed message.';
+  return `${code}: ${message}`;
+}
+
+function isLocalDevelopment() {
+  return ['localhost', '127.0.0.1'].includes(window.location.hostname);
 }
 
 function NavButton({ active, icon, onClick, label }) {

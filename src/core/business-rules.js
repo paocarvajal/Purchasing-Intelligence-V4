@@ -127,9 +127,9 @@ export function classifyLine({ description, satCode, provider, rfc, supplierRule
 
   if (IGNORE_SAT_CODES.has(String(satCode || ''))) {
     return {
-      lineType: LINE_TYPES.IGNORE,
-      odooType: 'Ignorar',
-      reason: 'SAT product/service code is configured as non-business.',
+      lineType: LINE_TYPES.REVIEW,
+      odooType: 'Revisar',
+      reason: 'SAT code looks non-business; review before ignoring.',
     };
   }
 
@@ -160,4 +160,3 @@ export function classifyLine({ description, satCode, provider, rfc, supplierRule
 
   return { lineType: LINE_TYPES.REVIEW, odooType: 'Revisar', reason: 'No confident rule matched.' };
 }
-

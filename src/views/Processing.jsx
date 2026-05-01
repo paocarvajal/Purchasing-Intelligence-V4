@@ -11,10 +11,12 @@ import {
   RefreshCcw,
   Search,
   ShieldCheck,
+  FolderOpen,
   Square,
   Trash2,
   TrendingUp,
   Upload,
+  XCircle,
 } from 'lucide-react';
 import Papa from 'papaparse';
 import { LINE_TYPES } from '../core/business-rules';
@@ -47,32 +49,80 @@ export default function Processing() {
   const [isDropzoneExpanded, setIsDropzoneExpanded] = useState(state.items.length === 0);
   const [groupBy, setGroupBy] = useState('uuid');
   const [archiveStatus, setArchiveStatus] = useState('');
+  const [importReport, setImportReport] = useState(null);
+  const xmlAccept = '.xml,.XML,text/xml,application/xml';
 
   const handleFiles = useCallback(async (files) => {
-    const xmls = files.filter((file) => file.name.toLowerCase().endsWith('.xml'));
+    setSearch('');
+    setFilterProv('');
+    setFilterAcct('');
+    setFilterCat('');
+    setFilterMonth('');
+    setShowOnlyPending(false);
+    setShowIgnoredAudit(true);
+
+    const xmls = files.filter((file) => {
+      const name = file.name.toLowerCase();
+      return name.endsWith('.xml') || file.type === 'text/xml' || file.type === 'application/xml';
+    });
+    const existingUuids = new Set(state.items.map((item) => item.uuid));
+    const report = {
+      selected: files.length,
+      xml: xmls.length,
+      parsed: 0,
+      added: 0,
+      duplicateLocal: 0,
+      duplicateCloud: 0,
+      saved: 0,
+      localOnly: 0,
+      lines: 0,
+      ignored: 0,
+      review: 0,
+      failed: [],
+    };
     let saved = 0;
     let duplicates = 0;
     let localOnly = 0;
     for (const file of xmls) {
       try {
         const { invoice, lines, xmlText } = await parseInvoiceXmlWithMetadata(file);
+        report.parsed += 1;
+        report.lines += lines.length;
+        report.ignored += lines.filter((line) => line.lineType === LINE_TYPES.IGNORE).length;
+        report.review += lines.filter((line) => line.reviewStatus === 'needs_review' || line.lineType === LINE_TYPES.REVIEW).length;
+        if (existingUuids.has(invoice.uuid)) {
+          report.duplicateLocal += 1;
+        } else {
+          report.added += 1;
+          existingUuids.add(invoice.uuid);
+        }
         addItems(lines);
         try {
           const result = await saveInvoiceWithLines(invoice, lines, xmlText);
-          if (result.status === 'duplicate') duplicates += 1;
-          else saved += 1;
+          if (result.status === 'duplicate') {
+            duplicates += 1;
+            report.duplicateCloud += 1;
+          } else {
+            saved += 1;
+            report.saved += 1;
+          }
         } catch (cloudError) {
           console.error(cloudError);
           localOnly += 1;
+          report.localOnly += 1;
         }
       } catch (error) {
         console.error(error);
+        report.failed.push({ file: file.name, reason: error.message });
       }
     }
+    setImportReport(report);
     if (xmls.length > 0) {
-      setArchiveStatus(`${saved} archivadas en Firebase, ${duplicates} duplicadas, ${localOnly} solo locales.`);
+      setArchiveStatus(`${report.parsed}/${report.xml} XML leidos. ${report.added} facturas nuevas, ${report.duplicateLocal} ya estaban cargadas. ${saved} archivadas en Firebase, ${duplicates} duplicadas en Firebase, ${localOnly} solo locales.`);
+    } else if (files.length > 0) {
+      setArchiveStatus('No encontre XML en la seleccion. Abre la carpeta sincronizada de Google Drive o usa Importar carpeta XML.');
     }
-  }, [addItems]);
+  }, [addItems, state.items]);
 
   const onDrop = useCallback(async (event) => {
     event.preventDefault();
@@ -247,20 +297,30 @@ export default function Processing() {
           onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
           onDrop={onDrop}
-          onClick={() => document.getElementById('xml-input').click()}
           className={cn(
-            'glass rounded-3xl transition-all cursor-pointer flex flex-col items-center justify-center gap-4 group relative overflow-hidden',
+            'glass rounded-3xl transition-all flex flex-col items-center justify-center gap-4 group relative overflow-hidden',
             isDragging ? 'border-2 border-dashed border-blue-500 bg-blue-500/10 scale-[1.01]' : 'border-2 border-dashed border-white/10 hover:border-white/20 hover:bg-white/5',
             isDropzoneExpanded ? 'p-10 h-auto opacity-100' : 'h-0 p-0 opacity-0 pointer-events-none'
           )}
         >
-          <input id="xml-input" type="file" multiple accept=".xml" className="hidden" onChange={(event) => { handleFiles(Array.from(event.target.files)); setIsDropzoneExpanded(false); }} />
+          <input id="xml-input" type="file" multiple accept={xmlAccept} className="hidden" onChange={(event) => { handleFiles(Array.from(event.target.files)); event.target.value = ''; setIsDropzoneExpanded(false); }} />
+          <input id="xml-folder-input" type="file" multiple webkitdirectory="" directory="" accept={xmlAccept} className="hidden" onChange={(event) => { handleFiles(Array.from(event.target.files)); event.target.value = ''; setIsDropzoneExpanded(false); }} />
           <div className="p-4 rounded-full bg-blue-500/10 text-blue-400 group-hover:scale-110 transition-transform">
             <Upload className="w-8 h-8" />
           </div>
           <div className="text-center">
             <p className="text-lg font-black text-white tracking-tight">Arrastra tus facturas XML aquí</p>
-            <p className="text-sm text-slate-500 font-medium">o haz clic para buscar archivos en tu computadora</p>
+            <p className="text-sm text-slate-500 font-medium">elige archivos XML o importa toda la carpeta sincronizada</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button type="button" onClick={() => document.getElementById('xml-input').click()} className="flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all">
+              <Upload className="w-4 h-4" />
+              Elegir XML
+            </button>
+            <button type="button" onClick={() => document.getElementById('xml-folder-input').click()} className="flex items-center justify-center gap-2 px-5 py-2.5 bg-white/10 hover:bg-white/15 text-slate-100 border border-white/10 rounded-xl text-xs font-black uppercase tracking-widest transition-all">
+              <FolderOpen className="w-4 h-4" />
+              Importar carpeta XML
+            </button>
           </div>
         </div>
       </div>
@@ -269,6 +329,29 @@ export default function Processing() {
         {archiveStatus && (
           <div className="px-4 py-3 rounded-xl bg-green-500/10 border border-green-500/20 text-xs font-bold text-green-300">
             {archiveStatus}
+          </div>
+        )}
+        {importReport && (
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+            <ReportPill label="Seleccionados" value={importReport.selected} />
+            <ReportPill label="XML" value={importReport.xml} />
+            <ReportPill label="Leidos" value={importReport.parsed} />
+            <ReportPill label="Nuevas" value={importReport.added} />
+            <ReportPill label="Ya cargadas" value={importReport.duplicateLocal} />
+            <ReportPill label="Lineas" value={importReport.lines} />
+            <ReportPill label="Revision" value={importReport.review} tone={importReport.review ? 'warn' : 'ok'} />
+            <ReportPill label="Fallidas" value={importReport.failed.length} tone={importReport.failed.length ? 'bad' : 'ok'} />
+            {importReport.failed.length > 0 && (
+              <div className="col-span-2 md:col-span-4 xl:col-span-8 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
+                <div className="flex items-center gap-2 font-black uppercase tracking-widest mb-2">
+                  <XCircle className="w-4 h-4" />
+                  Archivos no importados
+                </div>
+                {importReport.failed.slice(0, 6).map((failure) => (
+                  <p key={failure.file} className="font-mono">{failure.file}: {failure.reason}</p>
+                ))}
+              </div>
+            )}
           </div>
         )}
         <div className="flex flex-wrap gap-3">
@@ -455,6 +538,21 @@ function StatCard({ label, value, sub, icon, color, onClick, active }) {
       <div className={cn('p-2 rounded-xl text-white shadow-lg', color)}>
         {React.createElement(icon, { className: 'w-5 h-5' })}
       </div>
+    </div>
+  );
+}
+
+function ReportPill({ label, value, tone }) {
+  const colors = {
+    ok: 'border-green-500/20 bg-green-500/10 text-green-300',
+    warn: 'border-amber-500/20 bg-amber-500/10 text-amber-300',
+    bad: 'border-red-500/20 bg-red-500/10 text-red-300',
+  };
+
+  return (
+    <div className={cn('rounded-xl border px-3 py-2 bg-white/5 border-white/10', colors[tone])}>
+      <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">{label}</p>
+      <p className="text-lg font-black text-white">{Number(value || 0).toLocaleString('es-MX')}</p>
     </div>
   );
 }

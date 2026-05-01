@@ -1,5 +1,14 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut } from "firebase/auth";
+import {
+    browserLocalPersistence,
+    getAuth,
+    getRedirectResult,
+    GoogleAuthProvider,
+    setPersistence,
+    signInWithPopup,
+    signInWithRedirect,
+    signOut,
+} from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
@@ -18,18 +27,42 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: "select_account" });
+
+export const firebaseProject = {
+    projectId: firebaseConfig.projectId,
+    authDomain: firebaseConfig.authDomain,
+};
+
+setPersistence(auth, browserLocalPersistence).catch((error) => {
+    console.error("Error setting Firebase persistence:", error);
+});
+
+export const readRedirectLoginResult = async () => {
+    try {
+        return await getRedirectResult(auth);
+    } catch (error) {
+        console.error("Error completing Google redirect:", error);
+        throw error;
+    }
+};
 
 export const loginWithGoogle = async () => {
     try {
         const result = await signInWithPopup(auth, googleProvider);
         return result.user;
     } catch (error) {
-        if (error.code === "auth/popup-blocked" || error.code === "auth/cancelled-popup-request") {
+        if ([
+            "auth/popup-blocked",
+            "auth/cancelled-popup-request",
+            "auth/popup-closed-by-user",
+            "auth/operation-not-supported-in-this-environment",
+        ].includes(error.code)) {
             await signInWithRedirect(auth, googleProvider);
             return null;
         }
         console.error("Error logging in with Google:", error);
-        return null;
+        throw error;
     }
 };
 

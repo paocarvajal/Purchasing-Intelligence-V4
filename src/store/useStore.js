@@ -112,6 +112,7 @@ function enrichLine(line, state) {
   return {
     ...line,
     ...(shouldApplyRuleClassification ? ruleClassification : {}),
+    account: shouldApplyRuleClassification && ruleClassification.lineType === 'ignore' ? '' : line.account,
     reviewStatus: shouldApplyRuleClassification && ruleClassification.lineType !== 'review' ? 'ready' : line.reviewStatus,
     purchaseSku,
     skuShielded: purchaseSku,
