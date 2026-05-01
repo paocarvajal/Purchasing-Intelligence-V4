@@ -7,6 +7,7 @@ const CFDI_NAMESPACES = [
 ];
 
 const TFD_NAMESPACE = 'http://www.sat.gob.mx/TimbreFiscalDigital';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function getAttr(node, name, fallback = '') {
   if (!node) return fallback;
@@ -40,6 +41,16 @@ function allNodes(xml, localName, namespaceUris = []) {
 function parseNumber(value) {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeUuid(value) {
+  const cleaned = String(value || '').trim();
+  return UUID_PATTERN.test(cleaned) ? cleaned.toUpperCase() : '';
+}
+
+function getUuidFromFileName(fileName) {
+  const baseName = String(fileName || '').replace(/\.[^.]+$/, '');
+  return normalizeUuid(baseName);
 }
 
 function extractEmail(text) {
@@ -85,10 +96,15 @@ export async function parseInvoiceXml(file) {
     rfc = normalizeRfc(rfcMatch ? rfcMatch[0] : '');
   }
 
-  const uuid = getAttr(tfd, 'UUID') || `MANUAL-${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+  const stampedUuid = normalizeUuid(getAttr(tfd, 'UUID'));
+  const fileUuid = getUuidFromFileName(file.name);
+  const uuid = fileUuid || stampedUuid || `MANUAL-${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
   const fecha = getAttr(comp, 'Fecha').substring(0, 10);
+  const cfdiType = getAttr(comp, 'TipoDeComprobante');
   const invoice = {
     uuid,
+    stampedUuid,
+    cfdiType,
     fecha,
     provider,
     rfc,
@@ -117,6 +133,8 @@ export async function parseInvoiceXml(file) {
     return {
       id: `${uuid}-${index}`,
       uuid,
+      stampedUuid,
+      cfdiType,
       fecha,
       provider,
       rfc,
