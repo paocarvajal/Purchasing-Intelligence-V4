@@ -52,6 +52,14 @@ function getFileLabel(file) {
   return file.relativePath || file.webkitRelativePath || file.name;
 }
 
+function isActiveLine(item) {
+  return item.lineType !== LINE_TYPES.IGNORE;
+}
+
+function isPendingLine(item) {
+  return isActiveLine(item) && (item.reviewStatus === 'needs_review' || !item.account || !item.odooType);
+}
+
 export default function Processing() {
   const {
     state,
@@ -337,7 +345,7 @@ export default function Processing() {
       const matchesAcct = !filterAcct || (item.account || '').startsWith(filterAcct);
       const matchesCat = !filterCat || item.category === filterCat;
       const matchesMonth = !filterMonth || (item.fecha || '').startsWith(filterMonth);
-      const matchesPending = !showOnlyPending || item.reviewStatus === 'needs_review' || !item.account || !item.odooType;
+      const matchesPending = !showOnlyPending || isPendingLine(item);
       const matchesAudit = showIgnoredAudit || item.lineType !== LINE_TYPES.IGNORE;
       return matchesSearch && matchesProv && matchesAcct && matchesCat && matchesMonth && matchesPending && matchesAudit;
     });
@@ -369,6 +377,7 @@ export default function Processing() {
     bulkUpdate(new Set(items.map((item) => item.id)), updates);
   };
 
+  const activeItems = state.items.filter(isActiveLine);
   const ignoredCount = state.items.filter((item) => item.lineType === LINE_TYPES.IGNORE).length;
 
   const clearFilters = useCallback(() => {
@@ -390,16 +399,16 @@ export default function Processing() {
   }, [clearSession]);
 
   const stats = {
-    total: state.items.reduce((acc, curr) => acc + curr.subtotal, 0),
+    total: activeItems.reduce((acc, curr) => acc + curr.subtotal, 0),
     filteredTotal: filteredItems.reduce((acc, curr) => acc + curr.subtotal, 0),
-    invoiceCount: Math.max(Object.keys(state.invoices || {}).length, new Set(state.items.map((item) => item.uuid)).size),
+    invoiceCount: new Set(activeItems.map((item) => item.uuid)).size,
     visibleInvoiceCount: new Set(filteredItems.map((item) => item.uuid)).size,
-    lineCount: state.items.length,
+    lineCount: activeItems.length,
     visibleLineCount: filteredItems.length,
-    pending: state.items.filter((item) => item.reviewStatus === 'needs_review' || !item.account || !item.odooType).length,
-    visiblePending: filteredItems.filter((item) => item.reviewStatus === 'needs_review' || !item.account || !item.odooType).length,
+    pending: activeItems.filter(isPendingLine).length,
+    visiblePending: filteredItems.filter(isPendingLine).length,
     ignored: ignoredCount,
-    existing: state.items.filter((item) => item.isExisting).length,
+    existing: activeItems.filter((item) => item.isExisting).length,
   };
   const importedXmlCount = activeImportReport?.xml || 0;
   const importedUniqueUuidCount = activeImportReport?.uniqueUuids || activeImportReport?.invoiceFiles?.length || 0;
@@ -416,7 +425,7 @@ export default function Processing() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard label="Total Importado" value={`$${stats.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`} sub={`${stats.lineCount} líneas cargadas`} icon={TrendingUp} color="bg-blue-500" />
+        <StatCard label="Total Activo" value={`$${stats.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}`} sub={`${stats.lineCount} activas · ${ignoredCount} ignoradas`} icon={TrendingUp} color="bg-blue-500" />
         <StatCard
           label="Facturas Cargadas"
           value={hasImportMismatch ? `${stats.invoiceCount}/${importedXmlCount}` : stats.invoiceCount}
@@ -704,12 +713,13 @@ export default function Processing() {
                       </td>
                       <td className="px-6 py-2" colSpan="3">
                         <div className="flex items-center gap-2">
-                          <select onChange={(event) => applyToGroup(items, { odooType: event.target.value })} className="bg-slate-800/50 text-[10px] font-bold uppercase text-white border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500">
-                            <option value="">Tipo Bloque →</option>
+                          <select defaultValue="__noop" onChange={(event) => { if (event.target.value !== '__noop') applyToGroup(items, { odooType: event.target.value }); }} className="bg-slate-800/50 text-[10px] font-bold uppercase text-white border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                            <option value="__noop">Tipo Bloque →</option>
                             {TIPOS_ODOO.map((type) => <option key={type} value={type}>{type}</option>)}
                           </select>
-                          <select onChange={(event) => applyToGroup(items, { account: event.target.value })} className="bg-slate-800/50 text-[10px] font-bold uppercase text-white border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[220px]">
-                            <option value="">Cuenta Bloque →</option>
+                          <select defaultValue="__noop" onChange={(event) => { if (event.target.value !== '__noop') applyToGroup(items, { account: event.target.value }); }} className="bg-slate-800/50 text-[10px] font-bold uppercase text-white border border-white/10 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-[220px]">
+                            <option value="__noop">Cuenta Bloque →</option>
+                            <option value="">Sin Cuenta</option>
                             {CUENTAS.map((account) => <option key={account.codigo} value={`${account.codigo} — ${account.nombre}`}>{account.codigo} — {account.nombre}</option>)}
                           </select>
                         </div>
@@ -729,9 +739,9 @@ export default function Processing() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
-                            {item.reviewStatus === 'ready' && item.account && item.odooType ? <ShieldCheck className="w-4 h-4 text-success" /> : <AlertCircle className="w-4 h-4 text-red-500 animate-pulse" />}
-                            <span className={cn('text-[9px] font-black uppercase', item.reviewStatus === 'ready' && item.account && item.odooType ? 'text-success' : 'text-red-500')}>
-                              {item.reviewStatus === 'ready' && item.account && item.odooType ? 'Ready' : 'Review'}
+                            {item.lineType === LINE_TYPES.IGNORE || (item.reviewStatus === 'ready' && item.account && item.odooType) ? <ShieldCheck className="w-4 h-4 text-success" /> : <AlertCircle className="w-4 h-4 text-red-500 animate-pulse" />}
+                            <span className={cn('text-[9px] font-black uppercase', item.lineType === LINE_TYPES.IGNORE || (item.reviewStatus === 'ready' && item.account && item.odooType) ? 'text-success' : 'text-red-500')}>
+                              {item.lineType === LINE_TYPES.IGNORE ? 'Ignored' : (item.reviewStatus === 'ready' && item.account && item.odooType ? 'Ready' : 'Review')}
                             </span>
                           </div>
                         </td>

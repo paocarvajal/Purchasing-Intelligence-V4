@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   DEFAULT_SUPPLIER_RULES,
+  LINE_TYPES,
   buildPurchaseSku,
   classifyLine,
   isTruperBrand,
@@ -135,6 +136,51 @@ function enrichItems(items, state, options = {}) {
   return items.map((item) => enrichLine(item, state, options));
 }
 
+function lineTypeFromOdooType(odooType) {
+  switch (odooType) {
+    case 'Ignorar':
+      return LINE_TYPES.IGNORE;
+    case 'Inventario':
+      return LINE_TYPES.INVENTORY;
+    case 'Activo Fijo':
+      return LINE_TYPES.FIXED_ASSET;
+    case 'Servicio':
+      return LINE_TYPES.SERVICE;
+    case 'Gasto Operativo':
+    case 'Mantenimiento':
+      return LINE_TYPES.EXPENSE;
+    case 'Revisar':
+      return LINE_TYPES.REVIEW;
+    default:
+      return null;
+  }
+}
+
+function normalizeManualUpdates(updates) {
+  const next = { ...updates };
+
+  if (Object.prototype.hasOwnProperty.call(next, 'odooType')) {
+    const mappedLineType = lineTypeFromOdooType(next.odooType);
+    if (mappedLineType) next.lineType = mappedLineType;
+
+    if (next.odooType === 'Ignorar') {
+      next.account = '';
+      next.reviewStatus = 'ready';
+      next.reason = 'Manual ignore.';
+    } else if (next.odooType === 'Revisar') {
+      next.account = '';
+      next.reviewStatus = 'needs_review';
+      next.reason = 'Manual review.';
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(next, 'account') && !next.account && next.odooType !== 'Ignorar') {
+    next.account = '';
+  }
+
+  return next;
+}
+
 const setState = (next) => {
   globalState = typeof next === 'function' ? next(globalState) : { ...globalState, ...next };
   // Filter out non-serializable items for storage
@@ -187,16 +233,18 @@ export function useStore() {
   }, []);
 
   const updateItem = useCallback((id, updates) => {
+    const normalizedUpdates = normalizeManualUpdates(updates);
     setState(prev => ({
       ...prev,
-      items: prev.items.map(i => i.id === id ? { ...i, ...updates, manuallyReviewed: true } : i)
+      items: prev.items.map(i => i.id === id ? { ...i, ...normalizedUpdates, manuallyReviewed: true } : i)
     }));
   }, []);
 
   const bulkUpdate = useCallback((ids, updates) => {
+    const normalizedUpdates = normalizeManualUpdates(updates);
     setState(prev => ({
       ...prev,
-      items: prev.items.map(i => ids.has(i.id) ? { ...i, ...updates, manuallyReviewed: true } : i)
+      items: prev.items.map(i => ids.has(i.id) ? { ...i, ...normalizedUpdates, manuallyReviewed: true } : i)
     }));
   }, []);
 
