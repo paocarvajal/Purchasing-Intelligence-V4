@@ -78,7 +78,7 @@ export default function Processing() {
   } = useStore();
   const [isDragging, setIsDragging] = useState(false);
   const [search, setSearch] = useState('');
-  const [filterProv, setFilterProv] = useState('');
+  const [filterProvs, setFilterProvs] = useState([]);
   const [filterAcct, setFilterAcct] = useState('');
   const [filterCat, setFilterCat] = useState('');
   const [filterMonth, setFilterMonth] = useState('');
@@ -89,12 +89,13 @@ export default function Processing() {
   const [archiveStatus, setArchiveStatus] = useState(state.lastImportReport?.summary || '');
   const [importReport, setImportReport] = useState(state.lastImportReport || null);
   const [importProgress, setImportProgress] = useState(null);
+  const [exportStatus, setExportStatus] = useState('');
   const activeImportReport = importReport || state.lastImportReport;
   const xmlAccept = '.xml,.XML,text/xml,application/xml';
 
   const handleFiles = useCallback(async (files) => {
     setSearch('');
-    setFilterProv('');
+    setFilterProvs([]);
     setFilterAcct('');
     setFilterCat('');
     setFilterMonth('');
@@ -132,6 +133,7 @@ export default function Processing() {
       invoiceFiles: [],
       duplicateFiles: [],
       failed: [],
+      usoCfdiCounts: {},
     };
     let saved = 0;
     let duplicates = 0;
@@ -147,6 +149,8 @@ export default function Processing() {
         report.lines += lines.length;
         report.ignored += lines.filter((line) => line.lineType === LINE_TYPES.IGNORE).length;
         report.review += lines.filter((line) => line.reviewStatus === 'needs_review' || line.lineType === LINE_TYPES.REVIEW).length;
+        const usoKey = `${invoice.usoCfdi || 'SIN USO'} / Regimen ${invoice.receiverRegimen || 'S/R'}`;
+        report.usoCfdiCounts[usoKey] = (report.usoCfdiCounts[usoKey] || 0) + 1;
         const newLines = lines.filter((line) => !existingLineIds.has(line.id));
         const skippedLines = lines.length - newLines.length;
         report.addedLines += newLines.length;
@@ -175,6 +179,8 @@ export default function Processing() {
           file: fileLabel,
           uuid: invoice.uuid,
           provider: invoice.provider,
+          usoCfdi: invoice.usoCfdi,
+          receiverRegimen: invoice.receiverRegimen,
           lines: lines.length,
           addedLines: newLines.length,
         });
@@ -270,20 +276,52 @@ export default function Processing() {
     document.body.removeChild(link);
   };
 
+  const aggregateInventoryProducts = (items) => {
+    const byProduct = new Map();
+
+    items
+      .filter((item) => item.lineType === LINE_TYPES.INVENTORY)
+      .forEach((item) => {
+        const productRef = item.isExisting ? item.canonicalSku || item.skuOriginal : item.purchaseSku;
+        if (!productRef) return;
+        const existing = byProduct.get(productRef) || {
+          ...item,
+          productRef,
+          quantity: 0,
+          subtotal: 0,
+          maxSuggestedPrice: 0,
+        };
+        existing.quantity += Number(item.quantity) || 0;
+        existing.subtotal += Number(item.subtotal) || 0;
+        existing.maxSuggestedPrice = Math.max(existing.maxSuggestedPrice, Number(item.suggestedPrice) || 0);
+        if (!existing.description && item.description) existing.description = item.description;
+        if (!existing.provider && item.provider) existing.provider = item.provider;
+        if (!existing.category && item.category) existing.category = item.category;
+        byProduct.set(productRef, existing);
+      });
+
+    return [...byProduct.values()].map((item) => ({
+      ...item,
+      cost: item.quantity > 0 ? item.subtotal / item.quantity : Number(item.cost) || 0,
+      suggestedPrice: item.maxSuggestedPrice || item.suggestedPrice || 0,
+    }));
+  };
+
   const exportProducts = () => {
-    const existing = state.items
-      .filter((item) => item.isExisting && item.lineType === LINE_TYPES.INVENTORY)
+    const inventoryProducts = aggregateInventoryProducts(activeItems);
+    const existing = inventoryProducts
+      .filter((item) => item.isExisting)
       .map((item) => ({
-        'Internal Reference': item.canonicalSku || item.skuOriginal,
+        'Internal Reference': item.productRef,
         Cost: item.cost.toFixed(2),
         'Sales Price': item.suggestedPrice.toFixed(2),
         'Product Category': item.category,
       }));
 
-    const newProducts = state.items
-      .filter((item) => !item.isExisting && item.lineType === LINE_TYPES.INVENTORY)
+    const newProducts = inventoryProducts
+      .filter((item) => !item.isExisting)
       .map((item) => ({
-        'Internal Reference': item.purchaseSku,
+        'Internal Reference': item.productRef,
         Name: item.description,
         Cost: item.cost.toFixed(2),
         'Sales Price': item.suggestedPrice.toFixed(2),
@@ -294,15 +332,21 @@ export default function Processing() {
         'Vendor Taxes': 'IVA 16% (COMPRAS)',
       }));
 
-    downloadCSV(existing, '1_Odoo_Actualizar_Productos_Existentes.csv');
-    downloadCSV(newProducts, '2_Odoo_Crear_Productos_Nuevos.csv');
+    if (existing.length === 0 && newProducts.length === 0) {
+      setExportStatus('No hay productos activos de inventario para exportar.');
+      alert('No hay productos activos de inventario para exportar.');
+      return;
+    }
+
+    if (existing.length > 0) downloadCSV(existing, '1_Odoo_Actualizar_Productos_Existentes.csv');
+    if (newProducts.length > 0) downloadCSV(newProducts, '2_Odoo_Crear_Productos_Nuevos.csv');
+    setExportStatus(`Productos listos: ${existing.length} existentes y ${newProducts.length} nuevos. Se omitieron lineas ignoradas y se deduplico por SKU.`);
   };
 
   const exportInventory = () => {
-    const stockData = state.items
-      .filter((item) => item.lineType === LINE_TYPES.INVENTORY)
+    const stockData = aggregateInventoryProducts(activeItems)
       .map((item) => ({
-        'product_id/default_code': item.isExisting ? item.canonicalSku || item.skuOriginal : item.purchaseSku,
+        'product_id/default_code': item.productRef,
         inventory_quantity: item.quantity,
         location_id: 'WH/Stock',
         inventory_diff_quantity: item.quantity,
@@ -314,16 +358,19 @@ export default function Processing() {
     }
 
     downloadCSV(stockData, '3_Odoo_Cargar_Existencias.csv');
+    setExportStatus(`Existencias listas: ${stockData.length} SKUs activos, cantidades sumadas por SKU y sin lineas ignoradas.`);
   };
 
   const exportAccounting = () => {
-    const accountingLines = state.items
+    const accountingLines = activeItems
       .filter((item) => item.lineType !== LINE_TYPES.INVENTORY && item.lineType !== LINE_TYPES.IGNORE)
       .map((item) => ({
         UUID: item.uuid,
         Fecha: item.fecha,
         Proveedor: item.provider,
         RFC: item.rfc,
+        UsoCFDI: item.usoCfdi,
+        RegimenReceptor: item.receiverRegimen,
         Descripcion: item.description,
         Cuenta: item.account,
         Tipo: item.odooType,
@@ -333,7 +380,10 @@ export default function Processing() {
       }));
 
     downloadCSV(accountingLines, '4_Odoo_Clasificacion_Contable.csv');
+    setExportStatus(`Contabilidad lista: ${accountingLines.length} lineas activas no inventario. Las lineas ignoradas quedaron fuera.`);
   };
+
+  const activeItems = state.items.filter(isActiveLine);
 
   const filteredItems = useMemo(() => {
     return state.items.filter((item) => {
@@ -341,7 +391,7 @@ export default function Processing() {
         .join(' ')
         .toLowerCase();
       const matchesSearch = !search || haystack.includes(search.toLowerCase());
-      const matchesProv = !filterProv || item.provider === filterProv;
+      const matchesProv = filterProvs.length === 0 || filterProvs.includes(item.provider);
       const matchesAcct = !filterAcct || (item.account || '').startsWith(filterAcct);
       const matchesCat = !filterCat || item.category === filterCat;
       const matchesMonth = !filterMonth || (item.fecha || '').startsWith(filterMonth);
@@ -349,7 +399,7 @@ export default function Processing() {
       const matchesAudit = showIgnoredAudit || item.lineType !== LINE_TYPES.IGNORE;
       return matchesSearch && matchesProv && matchesAcct && matchesCat && matchesMonth && matchesPending && matchesAudit;
     });
-  }, [state.items, search, filterProv, filterAcct, filterCat, filterMonth, showOnlyPending, showIgnoredAudit]);
+  }, [state.items, search, filterProvs, filterAcct, filterCat, filterMonth, showOnlyPending, showIgnoredAudit]);
 
   const groupedData = useMemo(() => {
     const groups = {};
@@ -361,7 +411,7 @@ export default function Processing() {
     return groups;
   }, [filteredItems, groupBy]);
 
-  const uniqueProvs = [...new Set(state.items.map((item) => item.provider))].sort();
+  const uniqueProvs = [...new Set(activeItems.map((item) => item.provider))].sort();
   const uniqueMonths = [...new Set(state.items.map((item) => (item.fecha || '').substring(0, 7)))].filter(Boolean).sort().reverse();
   const uniqueCategories = [...new Set(state.items.map((item) => item.category))].filter(Boolean).sort();
 
@@ -377,12 +427,30 @@ export default function Processing() {
     bulkUpdate(new Set(items.map((item) => item.id)), updates);
   };
 
-  const activeItems = state.items.filter(isActiveLine);
-  const ignoredCount = state.items.filter((item) => item.lineType === LINE_TYPES.IGNORE).length;
+  const ignoredItems = state.items.filter((item) => item.lineType === LINE_TYPES.IGNORE);
+  const filteredActiveItems = filteredItems.filter(isActiveLine);
+  const filteredIgnoredItems = filteredItems.filter((item) => item.lineType === LINE_TYPES.IGNORE);
+  const ignoredCount = ignoredItems.length;
+  const selectedItems = state.items.filter((item) => state.selectedIds.has(item.id));
+  const selectedActiveItems = selectedItems.filter(isActiveLine);
+  const selectedInvoiceCount = new Set(selectedActiveItems.map((item) => item.uuid)).size;
+
+  const toggleProviderFilter = (provider) => {
+    setFilterProvs((prev) => (
+      prev.includes(provider)
+        ? prev.filter((value) => value !== provider)
+        : [...prev, provider]
+    ));
+  };
+
+  const applyToSelected = (updates) => {
+    if (selectedActiveItems.length === 0) return;
+    bulkUpdate(new Set(selectedActiveItems.map((item) => item.id)), updates);
+  };
 
   const clearFilters = useCallback(() => {
     setSearch('');
-    setFilterProv('');
+    setFilterProvs([]);
     setFilterAcct('');
     setFilterCat('');
     setFilterMonth('');
@@ -390,7 +458,7 @@ export default function Processing() {
     setShowIgnoredAudit(ignoredCount > 0);
   }, [ignoredCount]);
 
-  const hasActiveFilters = Boolean(search || filterProv || filterAcct || filterCat || filterMonth || showOnlyPending || (ignoredCount > 0 && !showIgnoredAudit));
+  const hasActiveFilters = Boolean(search || filterProvs.length > 0 || filterAcct || filterCat || filterMonth || showOnlyPending || (ignoredCount > 0 && !showIgnoredAudit));
 
   const handleClearSession = useCallback(() => {
     clearSession();
@@ -400,19 +468,25 @@ export default function Processing() {
 
   const stats = {
     total: activeItems.reduce((acc, curr) => acc + curr.subtotal, 0),
-    filteredTotal: filteredItems.reduce((acc, curr) => acc + curr.subtotal, 0),
+    filteredTotal: filteredActiveItems.reduce((acc, curr) => acc + curr.subtotal, 0),
     invoiceCount: new Set(activeItems.map((item) => item.uuid)).size,
-    visibleInvoiceCount: new Set(filteredItems.map((item) => item.uuid)).size,
+    visibleInvoiceCount: new Set(filteredActiveItems.map((item) => item.uuid)).size,
     lineCount: activeItems.length,
-    visibleLineCount: filteredItems.length,
+    visibleLineCount: filteredActiveItems.length,
     pending: activeItems.filter(isPendingLine).length,
-    visiblePending: filteredItems.filter(isPendingLine).length,
+    visiblePending: filteredActiveItems.filter(isPendingLine).length,
     ignored: ignoredCount,
+    ignoredInvoiceCount: new Set(ignoredItems.map((item) => item.uuid)).size,
+    ignoredTotal: ignoredItems.reduce((acc, curr) => acc + curr.subtotal, 0),
+    visibleIgnored: filteredIgnoredItems.length,
+    visibleIgnoredTotal: filteredIgnoredItems.reduce((acc, curr) => acc + curr.subtotal, 0),
     existing: activeItems.filter((item) => item.isExisting).length,
   };
   const importedXmlCount = activeImportReport?.xml || 0;
   const importedUniqueUuidCount = activeImportReport?.uniqueUuids || activeImportReport?.invoiceFiles?.length || 0;
   const hasImportMismatch = importedXmlCount > 0 && importedUniqueUuidCount > 0 && importedUniqueUuidCount !== importedXmlCount;
+  const visibleSelectableIds = filteredActiveItems.map((item) => item.id);
+  const allVisibleSelected = visibleSelectableIds.length > 0 && visibleSelectableIds.every((id) => state.selectedIds.has(id));
 
   return (
     <div className="space-y-6">
@@ -480,6 +554,9 @@ export default function Processing() {
         >
           <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Auditoria Ignorados</p>
           <p className="text-lg font-black text-white">{ignoredCount > 0 ? (showIgnoredAudit ? 'Visible' : 'Oculta') : 'Sin ignorados'} - {stats.ignored} lineas</p>
+          {ignoredCount > 0 && (
+            <p className="text-[10px] text-slate-500 font-bold">{stats.ignoredInvoiceCount} facturas - ${stats.ignoredTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })} fuera de totales</p>
+          )}
         </button>
       </div>
 
@@ -528,6 +605,11 @@ export default function Processing() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3">
             <div>
               <p className="text-xs font-black uppercase tracking-widest text-amber-300">Vista filtrada</p>
+              {stats.visibleIgnored > 0 && (
+                <p className="text-xs text-amber-100">
+                  Auditoria visible: {stats.visibleIgnored} lineas ignoradas (${stats.visibleIgnoredTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}) fuera de totales activos.
+                </p>
+              )}
               <p className="text-sm text-slate-200">
                 Mostrando {stats.visibleLineCount} de {stats.lineCount} líneas y {stats.visibleInvoiceCount} de {stats.invoiceCount} facturas.
               </p>
@@ -582,8 +664,22 @@ export default function Processing() {
                   {activeImportReport.invoiceFiles.map((invoice) => (
                     <div key={`${invoice.uuid}-${invoice.file}`} className="rounded-lg bg-background/60 px-3 py-2">
                       <p className="font-mono text-slate-100 truncate">{invoice.file}</p>
-                      <p className="text-slate-500">{invoice.provider} · *{invoice.uuid.slice(-12)} · {invoice.lines} lineas ({invoice.addedLines ?? invoice.lines} nuevas)</p>
+                      <p className="text-slate-500">{invoice.provider} · *{invoice.uuid.slice(-12)} · UsoCFDI {invoice.usoCfdi || 'S/U'} · Regimen {invoice.receiverRegimen || 'S/R'} · {invoice.lines} lineas ({invoice.addedLines ?? invoice.lines} nuevas)</p>
                     </div>
+                  ))}
+                </div>
+              </details>
+            )}
+            {activeImportReport.usoCfdiCounts && Object.keys(activeImportReport.usoCfdiCounts).length > 0 && (
+              <details className="col-span-2 md:col-span-4 xl:col-span-8 rounded-xl border border-blue-500/20 bg-blue-500/10 p-3 text-xs text-blue-100">
+                <summary className="cursor-pointer font-black uppercase tracking-widest text-blue-300">
+                  Diagnostico fiscal UsoCFDI / Regimen
+                </summary>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {Object.entries(activeImportReport.usoCfdiCounts).map(([key, count]) => (
+                    <span key={key} className="rounded-lg bg-background/60 px-3 py-2 font-bold">
+                      {key}: {count}
+                    </span>
                   ))}
                 </div>
               </details>
@@ -621,10 +717,31 @@ export default function Processing() {
             <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
             <input type="text" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar SKU, descripción, folio, RFC..." className="w-full bg-background/50 border border-white/10 rounded-xl pl-12 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
           </div>
-          <select value={filterProv} onChange={(event) => setFilterProv(event.target.value)} className="bg-background/50 border border-white/10 rounded-xl px-4 py-2 text-xs focus:outline-none min-w-[180px]">
-            <option value="">Proveedores</option>
-            {uniqueProvs.map((provider) => <option key={provider} value={provider}>{provider}</option>)}
-          </select>
+          <div className="min-w-[260px] max-w-[360px] rounded-xl border border-white/10 bg-background/50 px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-bold text-slate-300 truncate">
+                {filterProvs.length === 0 ? 'Proveedores' : `${filterProvs.length} proveedores`}
+              </span>
+              {filterProvs.length > 0 && (
+                <button onClick={() => setFilterProvs([])} className="text-[10px] font-black uppercase tracking-widest text-blue-300 hover:text-blue-100">
+                  limpiar
+                </button>
+              )}
+            </div>
+            <div className="mt-2 max-h-28 overflow-auto space-y-1 pr-1">
+              {uniqueProvs.map((provider) => (
+                <label key={provider} className="flex items-center gap-2 rounded-lg px-2 py-1 text-[10px] font-bold text-slate-300 hover:bg-white/5">
+                  <input
+                    type="checkbox"
+                    checked={filterProvs.includes(provider)}
+                    onChange={() => toggleProviderFilter(provider)}
+                    className="h-3.5 w-3.5 accent-blue-500"
+                  />
+                  <span className="truncate">{provider}</span>
+                </label>
+              ))}
+            </div>
+          </div>
           <select value={filterCat} onChange={(event) => setFilterCat(event.target.value)} className="bg-background/50 border border-white/10 rounded-xl px-4 py-2 text-xs focus:outline-none min-w-[180px]">
             <option value="">Categorías</option>
             {uniqueCategories.map((category) => <option key={category} value={category}>{category}</option>)}
@@ -659,6 +776,25 @@ export default function Processing() {
             <RefreshCcw className="w-4 h-4" />
             <span className="text-xs font-bold">Limpiar Todo</span>
           </button>
+          {selectedActiveItems.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-blue-200">
+                {selectedInvoiceCount} facturas / {selectedActiveItems.length} lineas
+              </span>
+              <select defaultValue="__noop" onChange={(event) => { if (event.target.value !== '__noop') applyToSelected({ odooType: event.target.value }); event.target.value = '__noop'; }} className="bg-slate-900 border border-white/10 rounded-lg text-[10px] px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/40 text-white">
+                <option value="__noop">Tipo seleccion</option>
+                {TIPOS_ODOO.map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+              <select defaultValue="__noop" onChange={(event) => { if (event.target.value !== '__noop') applyToSelected({ account: event.target.value }); event.target.value = '__noop'; }} className="bg-slate-900 border border-white/10 rounded-lg text-[10px] px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/40 text-white max-w-[240px]">
+                <option value="__noop">Cuenta seleccion</option>
+                <option value="">Sin Cuenta</option>
+                {CUENTAS.map((account) => <option key={account.codigo} value={`${account.codigo} — ${account.nombre}`}>{account.codigo} — {account.nombre}</option>)}
+              </select>
+              <button onClick={clearSelection} className="text-[10px] font-black uppercase tracking-widest text-slate-300 hover:text-white">
+                quitar seleccion
+              </button>
+            </div>
+          )}
           <button onClick={exportProducts} className="flex items-center gap-2 px-5 py-2.5 bg-secondary hover:bg-amber-500 text-black rounded-xl transition-all shadow-lg shadow-amber-500/20 ml-auto">
             <Download className="w-4 h-4" />
             <span className="text-sm font-bold">Productos</span>
@@ -672,6 +808,11 @@ export default function Processing() {
             <span className="text-sm font-bold">Contabilidad</span>
           </button>
         </div>
+        {exportStatus && (
+          <div className="mt-4 rounded-xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-xs font-bold text-blue-100">
+            {exportStatus}
+          </div>
+        )}
       </div>
 
       {filteredItems.length > 0 && (
@@ -681,8 +822,8 @@ export default function Processing() {
               <thead>
                 <tr className="bg-white/5 border-b border-white/5 text-[10px] font-black uppercase tracking-wider text-slate-400">
                   <th className="px-6 py-4 w-10">
-                    <button onClick={() => state.selectedIds.size > 0 ? clearSelection() : selectAll(filteredItems.map((item) => item.id))}>
-                      {state.selectedIds.size === filteredItems.length && filteredItems.length > 0 ? <CheckSquare className="w-4 h-4 text-blue-400" /> : <Square className="w-4 h-4" />}
+                    <button onClick={() => allVisibleSelected ? clearSelection() : selectAll(visibleSelectableIds)}>
+                      {allVisibleSelected ? <CheckSquare className="w-4 h-4 text-blue-400" /> : <Square className="w-4 h-4" />}
                     </button>
                   </th>
                   <th className="px-6 py-4">Status</th>
@@ -767,6 +908,9 @@ export default function Processing() {
                           <div className="flex flex-col max-w-[260px]">
                             <span className="text-xs text-slate-200 truncate font-semibold" title={item.description}>{item.description}</span>
                             <span className="text-[9px] text-blue-400 font-bold uppercase tracking-wider">{item.category}</span>
+                            {item.usoCfdi && (
+                              <span className="text-[9px] text-amber-300 font-bold uppercase tracking-wider">UsoCFDI {item.usoCfdi} · Regimen {item.receiverRegimen || 'S/R'}</span>
+                            )}
                             <span className="text-[9px] text-slate-600">{item.reason}</span>
                           </div>
                         </td>

@@ -109,6 +109,10 @@ export async function parseInvoiceXml(file) {
     provider,
     rfc,
     receiverRfc: normalizeRfc(getAttr(receptorNode, 'Rfc')),
+    receiverName: getAttr(receptorNode, 'Nombre').toUpperCase().trim(),
+    receiverPostalCode: getAttr(receptorNode, 'DomicilioFiscalReceptor'),
+    receiverRegimen: getAttr(receptorNode, 'RegimenFiscalReceptor'),
+    usoCfdi: getAttr(receptorNode, 'UsoCFDI'),
     subtotal: parseNumber(getAttr(comp, 'SubTotal')),
     total: parseNumber(getAttr(comp, 'Total')),
     currency: getAttr(comp, 'Moneda', 'MXN'),
@@ -126,7 +130,15 @@ export async function parseInvoiceXml(file) {
     const quantity = parseNumber(getAttr(node, 'Cantidad'));
     const subtotal = parseNumber(getAttr(node, 'Importe')) || cost * quantity;
     const satCode = getAttr(node, 'ClaveProdServ');
-    const classification = classifyLine({ description, satCode, provider, rfc });
+    const classification = classifyLine({
+      description,
+      satCode,
+      provider,
+      rfc,
+      usoCfdi: invoice.usoCfdi,
+      receiverRfc: invoice.receiverRfc,
+      receiverRegimen: invoice.receiverRegimen,
+    });
     const purchaseSku = buildPurchaseSku({ sku: skuOriginal, description, provider, rfc });
     const markup = calculateMarkup(description);
 
@@ -138,6 +150,11 @@ export async function parseInvoiceXml(file) {
       fecha,
       provider,
       rfc,
+      receiverRfc: invoice.receiverRfc,
+      receiverName: invoice.receiverName,
+      receiverPostalCode: invoice.receiverPostalCode,
+      receiverRegimen: invoice.receiverRegimen,
+      usoCfdi: invoice.usoCfdi,
       email,
       phone,
       cp,
@@ -154,8 +171,8 @@ export async function parseInvoiceXml(file) {
       quantity,
       qty: quantity,
       subtotal,
-      category: suggestCategory(description),
-      account: classification.lineType === 'ignore' || classification.odooType === 'Revisar' ? '' : suggestAccount(description),
+      category: classification.category || suggestCategory(description),
+      account: classification.lineType === 'ignore' || classification.odooType === 'Revisar' ? '' : classification.account || suggestAccount(description),
       markup,
       suggestedPrice: calculateSalesPrice(cost, markup),
       isExisting: false,

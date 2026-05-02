@@ -20,6 +20,7 @@ export const ODOO_COLUMNS = {
     unit: 'Unidad',
   },
   partner: {
+    externalId: 'ID',
     name: 'Nombre completo',
     vat: 'Número de identificación fiscal',
     email: 'Correo electrónico',
@@ -89,6 +90,7 @@ export function normalizeProductVariantRow(row) {
 }
 
 export function normalizePartnerRow(row) {
+  const externalId = normalizeText(get(row, ODOO_COLUMNS.partner.externalId) || get(row, 'External ID') || get(row, 'ID externo'));
   const vat = normalizeRfc(get(row, ODOO_COLUMNS.partner.vat));
   const name = String(get(row, ODOO_COLUMNS.partner.name) || '').trim();
   if (!vat && !name) return null;
@@ -96,6 +98,7 @@ export function normalizePartnerRow(row) {
   return {
     id: vat || normalizeText(name),
     vat,
+    externalId,
     name,
     email: String(get(row, ODOO_COLUMNS.partner.email) || '').trim().toLowerCase(),
     phone: String(get(row, ODOO_COLUMNS.partner.phone) || '').trim(),
@@ -123,6 +126,22 @@ export function indexById(records) {
     if (record?.id) acc[record.id] = record;
     return acc;
   }, {});
+}
+
+function dedupeById(records) {
+  const seen = new Set();
+  const unique = [];
+
+  records.forEach((record) => {
+    if (!record?.id || seen.has(record.id)) return;
+    seen.add(record.id);
+    unique.push(record);
+  });
+
+  return {
+    records: unique,
+    duplicateRecords: records.length - unique.length,
+  };
 }
 
 export function findDuplicatePartners(partners) {
@@ -194,7 +213,7 @@ export async function parseMasterDataFile(file, type) {
     ? parseCsv(await file.text())
     : await parseXlsx(file);
 
-  const records = rows
+  const normalizedRecords = rows
     .map(config.normalize)
     .filter(Boolean)
     .map((record) => ({
@@ -203,12 +222,15 @@ export async function parseMasterDataFile(file, type) {
       firestoreId: `${record.source}:${record.id}`,
       sourceFile: file.name,
     }));
+  const deduped = dedupeById(normalizedRecords);
 
   return {
     type,
     collection: config.collection,
     label: config.label,
-    records,
-    skipped: rows.length - records.length,
+    records: deduped.records,
+    skipped: rows.length - deduped.records.length,
+    invalidRows: rows.length - normalizedRecords.length,
+    duplicateRecords: deduped.duplicateRecords,
   };
 }

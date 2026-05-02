@@ -8,10 +8,17 @@ export const CUENTAS = [
   { codigo: '115.01.01', nombre: 'Inventario', tipo: 'Activos corrientes' },
   { codigo: '118.01.01', nombre: 'IVA acreditable pagado', tipo: 'Activos corrientes' },
   { codigo: '119.01.01', nombre: 'IVA pendiente de pago', tipo: 'Activos corrientes' },
-  { codigo: '155.01.01', nombre: 'Mobiliario y Equipo de Oficina', tipo: 'Activos fijos' },
-  { codigo: '156.01.01', nombre: 'Tecnología', tipo: 'Activos fijos' },
+  { codigo: '151.01.01', nombre: 'Terrenos', tipo: 'Activos fijos' },
+  { codigo: '152.01.01', nombre: 'Edificios', tipo: 'Activos fijos' },
+  { codigo: '153.01.01', nombre: 'Maquinaria y Equipo', tipo: 'Activos fijos' },
+  { codigo: '154.01.01', nombre: 'Mobiliario y Equipo de Oficina', tipo: 'Activos fijos' },
+  { codigo: '155.01.01', nombre: 'Equipo de Computo', tipo: 'Activos fijos' },
+  { codigo: '156.01.01', nombre: 'Equipo de Transporte', tipo: 'Activos fijos' },
+  { codigo: '157.01.01', nombre: 'Herramientas y Herramental', tipo: 'Activos fijos' },
+  { codigo: '159.01.01', nombre: 'Construcciones en Proceso', tipo: 'Activos fijos' },
   { codigo: '201.01.01', nombre: 'Proveedores nacionales', tipo: 'Por pagar' },
   { codigo: '501.01.01', nombre: 'Costo de venta', tipo: 'Costo de ingresos' },
+  { codigo: '502.01.01', nombre: 'Devoluciones y Descuentos sobre Compras', tipo: 'Costo de ingresos' },
   { codigo: '601.01.01', nombre: 'Sueldos y salarios', tipo: 'Costo de ingresos' },
   { codigo: '601.32.01', nombre: 'Gastos de Administración', tipo: 'Gastos' },
   { codigo: '601.34.01', nombre: 'Honorarios (P. Físicas)', tipo: 'Gastos' },
@@ -29,6 +36,8 @@ export const CUENTAS = [
   { codigo: '601.84.01', nombre: 'Otros gastos generales', tipo: 'Gastos' },
   { codigo: '602.61.01', nombre: 'Publicidad y Propaganda', tipo: 'Gastos' },
   { codigo: '602.72.01', nombre: 'Fletes y Acarreos', tipo: 'Gastos' },
+  { codigo: '602.99.01', nombre: 'Gastos no deducibles / personales', tipo: 'Gastos' },
+  { codigo: '603.01.01', nombre: 'Donativos', tipo: 'Gastos' },
   { codigo: '701.10.01', nombre: 'Comisiones Bancarias', tipo: 'Gastos' },
 ];
 
@@ -70,7 +79,10 @@ export function suggestAccount(description) {
   if (d.includes('software') || d.includes('membresia') || d.includes('odoo') || d.includes('suscripcion')) return '601.60.01 — Software y Suscripciones';
   if (d.includes('marketing') || d.includes('publicidad') || d.includes('promocional')) return '602.61.01 — Publicidad y Propaganda';
   if (d.includes('comision') && d.includes('banc')) return '701.10.01 — Comisiones Bancarias';
-  if (d.includes('impresora') || d.includes('laptop') || d.includes('equipo')) return '156.01.01 — Tecnología';
+  if (d.includes('impresora') || d.includes('laptop') || d.includes('computo')) return '155.01.01 — Equipo de Computo';
+  if (d.includes('maquinaria')) return '153.01.01 — Maquinaria y Equipo';
+  if (d.includes('herramienta') || d.includes('herramental')) return '157.01.01 — Herramientas y Herramental';
+  if (d.includes('equipo')) return '154.01.01 — Mobiliario y Equipo de Oficina';
   return '115.01.01 — Inventario';
 }
 
@@ -88,4 +100,3 @@ export function calculateSalesPrice(cost, markup) {
 export function shieldSKU(sku, description, provider, rfc) {
   return buildPurchaseSku({ sku, description, provider, rfc });
 }
-

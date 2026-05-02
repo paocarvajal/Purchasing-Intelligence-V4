@@ -14,7 +14,7 @@ import { useStore } from '../store/useStore';
 const TYPE_OPTIONS = Object.entries(MASTER_IMPORT_TYPES);
 
 export default function MasterData() {
-  const { state, importMasterData, replaceMasterData } = useStore();
+  const { state, importMasterData, markMasterImportSaved, replaceMasterData } = useStore();
   const [type, setType] = useState('productTemplates');
   const [message, setMessage] = useState('');
   const [isBusy, setIsBusy] = useState(false);
@@ -32,25 +32,30 @@ export default function MasterData() {
     setMessage(`Importando ${file.name}...`);
     try {
       const parsed = await parseMasterDataFile(file, type);
-      let savedToCloud = false;
-
-      try {
-        await upsertMasterRecords(parsed.collection, parsed.records);
-        savedToCloud = true;
-        setMessage(`${parsed.records.length} registros guardados en Firestore. ${parsed.skipped} filas omitidas.`);
-      } catch (cloudError) {
-        console.error(cloudError);
-        setMessage(`${parsed.records.length} registros cargados localmente. Firestore no acepto la escritura.`);
-      }
+      const importId = `${type}-${Date.now()}`;
       importMasterData(type, parsed.records, {
+        id: importId,
         skipped: parsed.skipped,
         sourceFile: file.name,
-        savedToCloud,
+        savedToCloud: false,
       });
+      const omittedSummary = `${parsed.invalidRows || 0} invalidas, ${parsed.duplicateRecords || 0} duplicadas`;
+      setMessage(`${parsed.records.length} registros unicos cargados localmente. ${parsed.skipped} filas omitidas (${omittedSummary}). Guardando en Firestore en segundo plano...`);
+      setIsBusy(false);
+
+      void (async () => {
+        try {
+          await upsertMasterRecords(parsed.collection, parsed.records);
+          markMasterImportSaved(importId);
+          setMessage(`${parsed.records.length} registros unicos cargados localmente y guardados en Firestore. ${parsed.skipped} filas omitidas (${omittedSummary}).`);
+        } catch (cloudError) {
+          console.error(cloudError);
+          setMessage(`${parsed.records.length} registros unicos cargados localmente. Firestore no acepto la escritura. ${parsed.skipped} filas omitidas (${omittedSummary}).`);
+        }
+      })();
     } catch (error) {
       console.error(error);
       setMessage(`No se pudo importar: ${error.message}`);
-    } finally {
       setIsBusy(false);
     }
   };

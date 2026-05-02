@@ -96,6 +96,9 @@ function enrichLine(line, state, options = {}) {
     satCode: line.satCode,
     provider: line.provider,
     rfc: line.rfc,
+    usoCfdi: line.usoCfdi,
+    receiverRfc: line.receiverRfc,
+    receiverRegimen: line.receiverRegimen,
     supplierRules: state.supplierRules,
   });
   const shouldApplyRuleClassification = options.forceClassification
@@ -117,7 +120,12 @@ function enrichLine(line, state, options = {}) {
   return {
     ...line,
     ...(shouldApplyRuleClassification ? ruleClassification : {}),
-    account: shouldApplyRuleClassification && ruleClassification.lineType === 'ignore' ? '' : line.account,
+    account: shouldApplyRuleClassification && (ruleClassification.lineType === 'ignore' || ruleClassification.odooType === 'Revisar')
+      ? ''
+      : shouldApplyRuleClassification && ruleClassification.account
+        ? ruleClassification.account
+        : line.account,
+    category: shouldApplyRuleClassification && ruleClassification.category ? ruleClassification.category : line.category,
     reviewStatus: shouldApplyRuleClassification && ruleClassification.lineType !== 'review' ? 'ready' : line.reviewStatus,
     purchaseSku,
     skuShielded: purchaseSku,
@@ -320,7 +328,7 @@ export function useStore() {
         },
         imports: [
           {
-            id: `${type}-${Date.now()}`,
+            id: importInfo.id || `${type}-${Date.now()}`,
             type,
             count: records.length,
             skipped: importInfo.skipped || 0,
@@ -337,6 +345,18 @@ export function useStore() {
         items: enrichItems(prev.items, nextState),
       };
     });
+  }, []);
+
+  const markMasterImportSaved = useCallback((importId) => {
+    setState(prev => ({
+      ...prev,
+      masterData: {
+        ...prev.masterData,
+        imports: (prev.masterData.imports || []).map((row) => (
+          row.id === importId ? { ...row, savedToCloud: true } : row
+        )),
+      },
+    }));
   }, []);
 
   const replaceMasterData = useCallback((nextMasterData) => {
@@ -405,6 +425,7 @@ export function useStore() {
     clearSession,
     updateProviderMetadata,
     importMasterData,
+    markMasterImportSaved,
     replaceMasterData,
     upsertSupplierRule,
     deleteSupplierRule,
