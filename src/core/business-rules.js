@@ -242,14 +242,35 @@ export function makeGeneratedSku(description, providerName = '') {
   return `GEN-${hash.toString(36).toUpperCase().substring(0, 8)}`;
 }
 
+/**
+ * Auto-generate a 3-letter prefix from the supplier's commercial name.
+ * Skips filler words like SA, DE, CV, S, etc.
+ * Examples: "SOLVEX DE OCCIDENTE SA DE CV" → "SOL"
+ *          "EMTOP TOOLS MEXICO" → "EMT"
+ *          "AKSI HERRAMIENTAS" → "AKS"
+ */
+export function generateSupplierPrefix(providerName) {
+  const FILLER = new Set(['SA', 'DE', 'CV', 'S', 'A', 'RL', 'SC', 'SAS', 'SPR', 'AC', 'EN', 'LA', 'EL', 'LOS', 'LAS', 'Y', 'E', 'DEL', 'AL']);
+  const words = normalizeText(providerName)
+    .replace(/[^A-Z\s]/g, '')
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !FILLER.has(w));
+  if (words.length === 0) return 'SUP';
+  const base = words[0];
+  return base.substring(0, 3);
+}
+
 export function buildPurchaseSku({ sku, description, provider, rfc, supplierRules = [] }) {
   const cleanSku = normalizeSku(sku) || makeGeneratedSku(description, provider);
   const rule = findSupplierRule(provider, rfc, supplierRules);
 
+  // 1. Explicit supplier rule prefix
   if (rule?.prefix) return `${rule.prefix}${cleanSku}`;
+  // 2. Truper brands keep original SKU (no prefix)
   if (isTruperBrand(provider, description)) return cleanSku;
-
-  return `SUP-${cleanSku}`;
+  // 3. Auto-generate prefix from supplier name
+  const autoPrefix = generateSupplierPrefix(provider);
+  return `${autoPrefix}-${cleanSku}`;
 }
 
 export function classifyLine({ description, satCode, provider, rfc, usoCfdi, receiverRfc, receiverRegimen, supplierRules = [] }) {

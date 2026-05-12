@@ -313,7 +313,8 @@ export default function Processing() {
       .filter((item) => item.isExisting)
       .map((item) => ({
         'Internal Reference': item.productRef,
-        Cost: item.cost.toFixed(2),
+        'Name': item.catalogName || item.description,
+        'Cost': item.cost.toFixed(2),
         'Sales Price': item.suggestedPrice.toFixed(2),
         'Product Category': item.category,
       }));
@@ -322,14 +323,18 @@ export default function Processing() {
       .filter((item) => !item.isExisting)
       .map((item) => ({
         'Internal Reference': item.productRef,
-        Name: item.description,
-        Cost: item.cost.toFixed(2),
+        'Name': item.description,
         'Sales Price': item.suggestedPrice.toFixed(2),
-        'Product Category': item.category,
+        'Cost': item.cost.toFixed(2),
         'Product Type': 'Storable Product',
-        'Vendors/Vendor': item.provider,
-        'Customer Taxes': 'IVA 16% (VENTAS)',
-        'Vendor Taxes': 'IVA 16% (COMPRAS)',
+        'Invoicing Policy': 'Ordered quantities',
+        'Track Inventory': 'TRUE',
+        'Product Category': item.category || 'All',
+        'Customer Taxes': 'IVA(16%) VENTAS',
+        'Vendor Taxes': 'IVA(16%) COMPRAS',
+        'Can be Sold': 'TRUE',
+        'Can be Purchased': 'TRUE',
+        'Barcode': '',
       }));
 
     if (existing.length === 0 && newProducts.length === 0) {
@@ -341,6 +346,27 @@ export default function Processing() {
     if (existing.length > 0) downloadCSV(existing, '1_Odoo_Actualizar_Productos_Existentes.csv');
     if (newProducts.length > 0) downloadCSV(newProducts, '2_Odoo_Crear_Productos_Nuevos.csv');
     setExportStatus(`Productos listos: ${existing.length} existentes y ${newProducts.length} nuevos. Se omitieron lineas ignoradas y se deduplico por SKU.`);
+  };
+
+  const exportSupplierPricelist = () => {
+    const inventoryProducts = aggregateInventoryProducts(activeItems);
+    const pricelistRows = inventoryProducts.map((item) => ({
+      'Product/Internal Reference': item.productRef,
+      'Vendor': item.provider,
+      'Vendor Product Name': item.description,
+      'Vendor Product Code': item.skuOriginal || '',
+      'Currency': 'MXN',
+      'Price': item.cost.toFixed(2),
+      'Min. Quantity': 1,
+    }));
+
+    if (pricelistRows.length === 0) {
+      alert('No hay productos de inventario para generar la lista de precios.');
+      return;
+    }
+
+    downloadCSV(pricelistRows, '3_Odoo_Supplier_Pricelist.csv');
+    setExportStatus(`Supplier Pricelist: ${pricelistRows.length} lineas con precios de proveedor listas para importar.`);
   };
 
   const exportInventory = () => {
@@ -357,7 +383,7 @@ export default function Processing() {
       return;
     }
 
-    downloadCSV(stockData, '3_Odoo_Cargar_Existencias.csv');
+    downloadCSV(stockData, '4_Odoo_Cargar_Existencias.csv');
     setExportStatus(`Existencias listas: ${stockData.length} SKUs activos, cantidades sumadas por SKU y sin lineas ignoradas.`);
   };
 
@@ -379,7 +405,7 @@ export default function Processing() {
         Subtotal: item.subtotal.toFixed(2),
       }));
 
-    downloadCSV(accountingLines, '4_Odoo_Clasificacion_Contable.csv');
+    downloadCSV(accountingLines, '5_Odoo_Clasificacion_Contable.csv');
     setExportStatus(`Contabilidad lista: ${accountingLines.length} lineas activas no inventario. Las lineas ignoradas quedaron fuera.`);
   };
 
@@ -798,6 +824,10 @@ export default function Processing() {
           <button onClick={exportProducts} className="flex items-center gap-2 px-5 py-2.5 bg-secondary hover:bg-amber-500 text-black rounded-xl transition-all shadow-lg shadow-amber-500/20 ml-auto">
             <Download className="w-4 h-4" />
             <span className="text-sm font-bold">Productos</span>
+          </button>
+          <button onClick={exportSupplierPricelist} className="flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-500 text-white rounded-xl transition-all shadow-lg shadow-green-500/20">
+            <Download className="w-4 h-4" />
+            <span className="text-sm font-bold">Supplier Pricelist</span>
           </button>
           <button onClick={exportInventory} className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl transition-all shadow-lg shadow-blue-500/20">
             <Box className="w-4 h-4" />
