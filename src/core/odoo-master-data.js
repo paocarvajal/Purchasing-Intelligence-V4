@@ -4,34 +4,34 @@ import * as XLSX from 'xlsx';
 
 export const ODOO_COLUMNS = {
   productTemplate: {
-    name: 'Nombre',
-    internalRef: 'Referencia interna',
-    category: 'Categoría del producto',
-    salePrice: 'Precio de venta',
-    stock: 'Cantidad a la mano',
-    unit: 'Unidad',
+    name: ['Nombre', 'Name'],
+    internalRef: ['Referencia interna', 'Internal Reference'],
+    category: ['Categoría del producto', 'Product Category'],
+    salePrice: ['Precio de venta', 'Sales Price'],
+    stock: ['Cantidad a la mano', 'Quantity On Hand'],
+    unit: ['Unidad', 'Unit'],
   },
   productVariant: {
-    displayName: 'Nombre en pantalla',
-    averageCost: 'Costo promedio',
-    totalValue: 'Valor total',
-    stock: 'Cantidad a la mano',
-    available: 'Cantidad disponible para uso',
-    unit: 'Unidad',
+    displayName: ['Nombre en pantalla', 'Display Name'],
+    averageCost: ['Costo promedio', 'Average Cost', 'Cost'],
+    totalValue: ['Valor total', 'Total Value'],
+    stock: ['Cantidad a la mano', 'Quantity On Hand'],
+    available: ['Cantidad disponible para uso', 'Available Quantity'],
+    unit: ['Unidad', 'Unit'],
   },
   partner: {
-    externalId: 'ID',
-    name: 'Nombre completo',
-    vat: 'Número de identificación fiscal',
-    email: 'Correo electrónico',
-    phone: 'Teléfono',
-    country: 'País',
-    tags: 'Etiquetas',
+    externalId: ['ID', 'External ID', 'ID externo'],
+    name: ['Nombre completo', 'Name'],
+    vat: ['Número de identificación fiscal', 'Tax ID', 'VAT'],
+    email: ['Correo electrónico', 'Email'],
+    phone: ['Teléfono', 'Phone'],
+    country: ['País', 'Country'],
+    tags: ['Etiquetas', 'Tags'],
   },
   account: {
-    code: 'Código',
-    name: 'Nombre de la cuenta',
-    type: 'Tipo',
+    code: ['Código', 'Code'],
+    name: ['Nombre de la cuenta', 'Account Name'],
+    type: ['Tipo', 'Type'],
   },
 };
 
@@ -43,9 +43,14 @@ function normalizeRow(row) {
   }, {});
 }
 
-function get(row, columnName) {
+function get(row, columnNames) {
   const normalized = normalizeRow(row);
-  return normalized[columnName] ?? normalized[normalizeText(columnName)] ?? '';
+  const names = Array.isArray(columnNames) ? columnNames : [columnNames];
+  for (const name of names) {
+    const val = normalized[name] ?? normalized[normalizeText(name)];
+    if (val !== undefined && val !== null && val !== '') return val;
+  }
+  return '';
 }
 
 function toNumber(value) {
