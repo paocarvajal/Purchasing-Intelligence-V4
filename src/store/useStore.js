@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { get as idbGet, set as idbSet } from 'idb-keyval';
 import {
   DEFAULT_SUPPLIER_RULES,
   LINE_TYPES,
@@ -31,9 +32,9 @@ let globalState = {
     { id: 'fer41', name: 'Ferretería 41', emoji: '🔩' },
     { id: 'gen', name: 'General', emoji: '🏬' },
   ],
-  itemDests: {}, // uuid -> destId
+  itemDests: {},
   selectedIds: new Set(),
-  providerMetadata: {}, // rfc -> { activity: string, email: string, phone: string }
+  providerMetadata: {},
   supplierRules: DEFAULT_SUPPLIER_RULES,
   masterData: DEFAULT_MASTER_DATA,
   lastImportReport: null,
@@ -49,13 +50,21 @@ if (stored) {
       ...parsed,
       selectedIds: new Set(),
       supplierRules: parsed.supplierRules?.length ? parsed.supplierRules : DEFAULT_SUPPLIER_RULES,
-      masterData: { ...DEFAULT_MASTER_DATA, ...(parsed.masterData || {}) },
+      masterData: DEFAULT_MASTER_DATA, // MasterData will be loaded from IndexedDB asynchronously
       syncLog: parsed.syncLog || [],
     };
   } catch {
     localStorage.removeItem('hm_v4_store');
   }
 }
+
+// Load Master Data from IndexedDB asynchronously to avoid localStorage quota limits
+idbGet('hm_v4_master_data').then((md) => {
+  if (md) {
+    globalState = { ...globalState, masterData: { ...DEFAULT_MASTER_DATA, ...md } };
+    listeners.forEach(l => l(globalState));
+  }
+}).catch(console.error);
 
 const listeners = new Set();
 
@@ -200,9 +209,16 @@ function normalizeManualUpdates(updates, existingItem = null) {
 
 const setState = (next) => {
   globalState = typeof next === 'function' ? next(globalState) : { ...globalState, ...next };
-  // Filter out non-serializable items for storage
-  const { selectedIds: _selectedIds, ...toStore } = globalState;
+  // Filter out non-serializable items and large objects for localStorage
+  const { selectedIds: _selectedIds, masterData, ...toStore } = globalState;
+  
   localStorage.setItem('hm_v4_store', JSON.stringify(toStore));
+  
+  // Save large Master Data to IndexedDB asynchronously
+  if (masterData) {
+    idbSet('hm_v4_master_data', masterData).catch(console.error);
+  }
+  
   listeners.forEach(l => l(globalState));
 };
 
