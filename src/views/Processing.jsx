@@ -816,6 +816,10 @@ export default function Processing() {
                 <option value="">Sin Cuenta</option>
                 {CUENTAS.map((account) => <option key={account.codigo} value={`${account.codigo} — ${account.nombre}`}>{account.codigo} — {account.nombre}</option>)}
               </select>
+              <div className="flex items-center gap-1 bg-slate-900 border border-white/10 rounded-lg px-2 py-1.5 focus-within:ring-2 focus-within:ring-blue-500/40">
+                <span className="text-[10px] font-bold text-slate-400">Utilidad %:</span>
+                <input type="number" placeholder="Ej. 25" onBlur={(e) => { if(e.target.value) applyToSelected({ markup: Number(e.target.value) }); e.target.value = ''; }} className="w-12 bg-transparent text-[10px] text-white focus:outline-none ml-1 text-center" />
+              </div>
               <button onClick={clearSelection} className="text-[10px] font-black uppercase tracking-widest text-slate-300 hover:text-white">
                 quitar seleccion
               </button>
@@ -860,6 +864,7 @@ export default function Processing() {
                   <th className="px-6 py-4">Identificador / RFC</th>
                   <th className="px-6 py-4">SKU Compra</th>
                   <th className="px-6 py-4">Descripción / Categoría</th>
+                  <th className="px-6 py-4">Costo / Utilidad / Venta</th>
                   <th className="px-6 py-4">Tipo Odoo</th>
                   <th className="px-6 py-4">Cuenta Mayor</th>
                   <th className="px-6 py-4 text-right">Total</th>
@@ -893,6 +898,10 @@ export default function Processing() {
                             <option value="">Sin Cuenta</option>
                             {CUENTAS.map((account) => <option key={account.codigo} value={`${account.codigo} — ${account.nombre}`}>{account.codigo} — {account.nombre}</option>)}
                           </select>
+                          <div className="flex items-center gap-1 bg-slate-800/50 border border-white/10 rounded-lg px-2 py-1 focus-within:ring-1 focus-within:ring-blue-500">
+                            <span className="text-[10px] font-bold uppercase text-white">Utilidad % →</span>
+                            <input type="number" placeholder="25" onBlur={(e) => { if(e.target.value) applyToGroup(items, { markup: Number(e.target.value) }); e.target.value = ''; }} className="w-8 bg-transparent text-[10px] text-white focus:outline-none ml-1 text-center font-bold" />
+                          </div>
                         </div>
                       </td>
                       <td className="px-6 py-2 text-right">
@@ -942,6 +951,17 @@ export default function Processing() {
                               <span className="text-[9px] text-amber-300 font-bold uppercase tracking-wider">UsoCFDI {item.usoCfdi} · Regimen {item.receiverRegimen || 'S/R'}</span>
                             )}
                             <span className="text-[9px] text-slate-600">{item.reason}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-white">Costo: ${(item.cost || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-slate-400">Utilidad:</span>
+                              <input type="number" value={item.markup ?? 25} onChange={(e) => updateItem(item.id, { markup: Number(e.target.value) })} className="w-14 bg-slate-900 border border-white/10 rounded px-1 py-0.5 text-[10px] text-white focus:outline-none text-center" />
+                              <span className="text-[10px] text-slate-400">%</span>
+                            </div>
+                            <span className="text-xs text-green-400 font-bold">Venta: ${(item.suggestedPrice || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4">

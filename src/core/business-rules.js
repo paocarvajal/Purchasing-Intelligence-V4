@@ -35,6 +35,13 @@ export const TRUPER_BRANDS = [
 
 export const DEFAULT_SUPPLIER_RULES = [
   {
+    key: 'solvex',
+    match: ['SOLVEX', 'SIFLUX'],
+    prefix: 'SOL-',
+    defaultLineType: LINE_TYPES.INVENTORY,
+    defaultOdooType: 'Inventario',
+  },
+  {
     key: 'electrica-45',
     match: ['ELECTRICA EL 45', 'ELECTRICA 45', 'EL 45'],
     prefix: 'E45-',

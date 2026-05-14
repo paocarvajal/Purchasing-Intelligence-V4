@@ -89,12 +89,13 @@ export function suggestAccount(description) {
 export function calculateMarkup(description) {
   const d = description.toLowerCase();
   if (d.includes('renta') || d.includes('luz') || d.includes('tel') || d.includes('flete')) return 0;
-  return 1.25;
+  return 25; // Default 25% utilidad
 }
 
 export function calculateSalesPrice(cost, markup) {
   if (markup === 0) return cost;
-  return cost * markup;
+  const costWithIva = cost * 1.16; // Sumar IVA (16%)
+  return costWithIva * (1 + (markup / 100)); // Sumar % de utilidad
 }
 
 export function shieldSKU(sku, description, provider, rfc) {

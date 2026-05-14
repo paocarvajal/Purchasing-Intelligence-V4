@@ -8,6 +8,7 @@ import {
   normalizeRfc,
   normalizeSku,
 } from '../core/business-rules';
+import { calculateSalesPrice } from '../core/odoo-logic';
 
 /**
  * Global Store for HerraMax V4
@@ -164,7 +165,7 @@ function lineTypeFromOdooType(odooType) {
   }
 }
 
-function normalizeManualUpdates(updates) {
+function normalizeManualUpdates(updates, existingItem = null) {
   const next = { ...updates };
 
   if (Object.prototype.hasOwnProperty.call(next, 'odooType')) {
@@ -184,6 +185,14 @@ function normalizeManualUpdates(updates) {
 
   if (Object.prototype.hasOwnProperty.call(next, 'account') && !next.account && next.odooType !== 'Ignorar') {
     next.account = '';
+  }
+
+  if (existingItem) {
+    if (next.markup !== undefined || next.cost !== undefined) {
+      const cost = next.cost !== undefined ? Number(next.cost) : Number(existingItem.cost);
+      const markup = next.markup !== undefined ? Number(next.markup) : Number(existingItem.markup);
+      next.suggestedPrice = calculateSalesPrice(cost, markup);
+    }
   }
 
   return next;
@@ -241,18 +250,25 @@ export function useStore() {
   }, []);
 
   const updateItem = useCallback((id, updates) => {
-    const normalizedUpdates = normalizeManualUpdates(updates);
-    setState(prev => ({
-      ...prev,
-      items: prev.items.map(i => i.id === id ? { ...i, ...normalizedUpdates, manuallyReviewed: true } : i)
-    }));
+    setState(prev => {
+      const item = prev.items.find(i => i.id === id);
+      const normalizedUpdates = normalizeManualUpdates(updates, item);
+      return {
+        ...prev,
+        items: prev.items.map(i => i.id === id ? { ...i, ...normalizedUpdates, manuallyReviewed: true } : i)
+      };
+    });
   }, []);
 
   const bulkUpdate = useCallback((ids, updates) => {
-    const normalizedUpdates = normalizeManualUpdates(updates);
     setState(prev => ({
       ...prev,
-      items: prev.items.map(i => ids.has(i.id) ? { ...i, ...normalizedUpdates, manuallyReviewed: true } : i)
+      items: prev.items.map(i => {
+        if (ids.has(i.id)) {
+          return { ...i, ...normalizeManualUpdates(updates, i), manuallyReviewed: true };
+        }
+        return i;
+      })
     }));
   }, []);
 
