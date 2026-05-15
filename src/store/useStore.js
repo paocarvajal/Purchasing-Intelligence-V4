@@ -9,7 +9,7 @@ import {
   normalizeRfc,
   normalizeSku,
 } from '../core/business-rules';
-import { calculateSalesPrice } from '../core/odoo-logic';
+import { calculateSalesPrice, suggestCategory } from '../core/odoo-logic';
 
 /**
  * Global Store for HerraMax V4
@@ -135,7 +135,9 @@ function enrichLine(line, state, options = {}) {
       : shouldApplyRuleClassification && ruleClassification.account
         ? ruleClassification.account
         : line.account,
-    category: shouldApplyRuleClassification && ruleClassification.category ? ruleClassification.category : line.category,
+    category: shouldApplyRuleClassification 
+      ? (ruleClassification.category || suggestCategory(line.description, line.provider))
+      : line.category,
     reviewStatus: shouldApplyRuleClassification && ruleClassification.lineType !== 'review' ? 'ready' : line.reviewStatus,
     purchaseSku,
     skuShielded: purchaseSku,
