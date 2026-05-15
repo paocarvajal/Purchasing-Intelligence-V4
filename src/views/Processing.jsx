@@ -309,33 +309,35 @@ export default function Processing() {
 
   const exportProducts = () => {
     const inventoryProducts = aggregateInventoryProducts(activeItems);
+    
+    const mapToOdooFormat = (item, isNew) => ({
+      'Name': item.catalogName || item.description,
+      'Internal Reference': item.productRef,
+      'Barcode': '',
+      'Product Type': 'Goods',
+      'product Category': item.category || 'All',
+      'Sales Price': item.suggestedPrice.toFixed(2),
+      'Cost': item.cost.toFixed(2),
+      'Marca': item.provider || '',
+      'Clave del proveedor': item.skuOriginal || '',
+      'Unit': item.unitName || 'Part',
+      ...(isNew ? {
+        'Customer Taxes': 'IVA(16%) VENTAS',
+        'Vendor Taxes': 'IVA(16%) COMPRAS',
+        'Invoicing Policy': 'Ordered quantities',
+        'Track Inventory': 'TRUE',
+        'Can be Sold': 'TRUE',
+        'Can be Purchased': 'TRUE'
+      } : {})
+    });
+
     const existing = inventoryProducts
       .filter((item) => item.isExisting)
-      .map((item) => ({
-        'Internal Reference': item.productRef,
-        'Name': item.catalogName || item.description,
-        'Cost': item.cost.toFixed(2),
-        'Sales Price': item.suggestedPrice.toFixed(2),
-        'Product Category': item.category,
-      }));
+      .map(item => mapToOdooFormat(item, false));
 
     const newProducts = inventoryProducts
       .filter((item) => !item.isExisting)
-      .map((item) => ({
-        'Internal Reference': item.productRef,
-        'Name': item.description,
-        'Sales Price': item.suggestedPrice.toFixed(2),
-        'Cost': item.cost.toFixed(2),
-        'Product Type': 'Storable Product',
-        'Invoicing Policy': 'Ordered quantities',
-        'Track Inventory': 'TRUE',
-        'Product Category': item.category || 'All',
-        'Customer Taxes': 'IVA(16%) VENTAS',
-        'Vendor Taxes': 'IVA(16%) COMPRAS',
-        'Can be Sold': 'TRUE',
-        'Can be Purchased': 'TRUE',
-        'Barcode': '',
-      }));
+      .map(item => mapToOdooFormat(item, true));
 
     if (existing.length === 0 && newProducts.length === 0) {
       setExportStatus('No hay productos activos de inventario para exportar.');
