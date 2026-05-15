@@ -171,7 +171,7 @@ export async function parseInvoiceXml(file) {
       quantity,
       qty: quantity,
       subtotal,
-      category: classification.category || suggestCategory(description),
+      category: classification.category || suggestCategory(description, provider),
       account: classification.lineType === 'ignore' || classification.odooType === 'Revisar' ? '' : classification.account || suggestAccount(description),
       markup,
       suggestedPrice: calculateSalesPrice(cost, markup),

@@ -49,21 +49,41 @@ export function formatAccount(account) {
   return `${account.codigo} — ${account.nombre}`;
 }
 
-export function suggestCategory(description) {
+export function suggestCategory(description, provider = '') {
   const d = description.toLowerCase();
+  const p = provider.toLowerCase();
+
+  // Marcas de Truper y categorías específicas
+  if (p.includes('foset') || d.includes('foset')) return 'Plomería';
+  if (p.includes('hermex') || d.includes('hermex') || d.includes('candado') || d.includes('cerradura') || d.includes('chapa')) return 'Cerrajería';
+  if (p.includes('volteck') || p.includes('voltek') || d.includes('volteck')) return 'Material Eléctrico';
+  if (p.includes('klintek') || d.includes('klintek') || d.includes('escoba')) return 'Jarciería y Limpieza';
+  if (p.includes('fiero') || d.includes('fiero')) {
+    if (d.includes('malla') || d.includes('ciclonica') || d.includes('ciclónica')) return 'Mallas ciclónicas';
+    if (d.includes('clavo') || d.includes('tornillo') || d.includes('pija') || d.includes('tuerca')) return 'Fijación y Soporte';
+    if (d.includes('alambre') || d.includes('pua') || d.includes('malla')) return 'Aceros y Mallas';
+    return 'Acero y Construcción';
+  }
+  if (p.includes('pretul') || d.includes('pretul')) return 'Herramienta Manual (Pretul)';
+  if (p.includes('truper') || d.includes('truper')) return 'Herramienta Manual';
+
+  // Otras Marcas
+  if (p.includes('solvex') || p.includes('siflux')) return 'Plomería';
+  if (p.includes('electrica') || p.includes('el 45')) return 'Material Eléctrico';
+
+  // Lógica General
+  if (d.includes('tubo') || d.includes('pvc') || d.includes('codo') || d.includes('conector') || d.includes('valvula') || d.includes('cpvc')) return 'Plomería';
+  if (d.includes('cable') || d.includes('foco') || d.includes('apagador') || d.includes('contacto') || d.includes('luminaria') || d.includes('led')) return 'Material Eléctrico';
+  if (d.includes('martillo') || d.includes('pinza') || d.includes('desarmador') || d.includes('llave') || d.includes('dado') || d.includes('matraca')) return 'Herramienta Manual';
+  if (d.includes('pintura') || d.includes('brocha') || d.includes('rodillo') || d.includes('esmalte') || d.includes('sellador')) return 'Pinturas y Accesorios';
   if (d.includes('flete') || d.includes('envio') || d.includes('acarreo')) return 'Servicios / Fletes';
   if (d.includes('renta') || d.includes('alquiler')) return 'Gastos / Arrendamiento';
   if (d.includes('luz') || d.includes('cfe') || d.includes('electrica')) return 'Servicios / Electricidad';
   if (d.includes('tel') || d.includes('internet') || d.includes('izzi') || d.includes('telmex')) return 'Servicios / Telecom';
   if (d.includes('gasolin') || d.includes('diesel') || d.includes('combustible')) return 'Gastos / Combustible';
-  if (d.includes('limpieza') || d.includes('detergente') || d.includes('jabon')) return 'Gastos / Limpieza';
-  if (d.includes('papel') || d.includes('tinta') || d.includes('toner') || d.includes('oficina')) return 'Gastos / Papelería';
-  if (d.includes('marketing') || d.includes('publicidad') || d.includes('promocional')) return 'Marketing / Promocionales';
-  if (d.includes('software') || d.includes('odoo') || d.includes('suscripcion')) return 'Servicios / Software';
-  if (d.includes('tubo') || d.includes('pvc') || d.includes('codo')) return 'Ferretería / Plomería';
-  if (d.includes('cable') || d.includes('foco') || d.includes('apagador')) return 'Ferretería / Eléctrico';
-  if (d.includes('martillo') || d.includes('pinza') || d.includes('desarmador')) return 'Ferretería / Herramientas';
-  return 'Ferretería / General';
+  if (d.includes('limpieza') || d.includes('detergente') || d.includes('jabon') || d.includes('papel')) return 'Gastos / Limpieza';
+  
+  return 'Ferretería General';
 }
 
 export function suggestAccount(description) {
