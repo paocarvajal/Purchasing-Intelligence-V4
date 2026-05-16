@@ -36,7 +36,7 @@ export const TRUPER_BRANDS = [
 export const DEFAULT_SUPPLIER_RULES = [
   {
     key: 'solvex',
-    match: ['SOLVEX', 'SIFLUX'],
+    match: ['SOLVEX', 'SIFLUX', 'SIFLUSS'],
     prefix: 'SOL-',
     defaultLineType: LINE_TYPES.INVENTORY,
     defaultOdooType: 'Inventario',
