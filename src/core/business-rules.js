@@ -267,8 +267,23 @@ export function generateSupplierPrefix(providerName) {
 }
 
 export function buildPurchaseSku({ sku, description, provider, rfc, supplierRules = [] }) {
-  const cleanSku = normalizeSku(sku) || makeGeneratedSku(description, provider);
+  let cleanSku = normalizeSku(sku) || makeGeneratedSku(description, provider);
   const rule = findSupplierRule(provider, rfc, supplierRules);
+
+  // SIFLUSS Rule: The real SKU is always embedded at the end of the description.
+  // Example: "CONTRACANASTA SVX OVALIN PUSH NEGRA 70014N" -> "70014N"
+  // Example: "CONTRACANASTA P/TARJA ONSUN A9125/500106" -> "A9125"
+  if (normalizeText(provider).includes('SIFLUSS')) {
+    const words = String(description).trim().split(/\s+/);
+    if (words.length > 0) {
+      const lastWord = words[words.length - 1];
+      // Clean parentheses and take the first token if separated by slashes
+      const extractedSku = lastWord.replace(/[()]/g, '').split('/')[0];
+      if (extractedSku) {
+        cleanSku = normalizeSku(extractedSku);
+      }
+    }
+  }
 
   // 1. Explicit supplier rule prefix
   if (rule?.prefix) return `${rule.prefix}${cleanSku}`;
