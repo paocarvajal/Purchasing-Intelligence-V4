@@ -83,7 +83,6 @@ export const USO_CFDI_RULES = {
     lineType: LINE_TYPES.INVENTORY,
     odooType: 'Inventario',
     account: '115.01.01 — Inventario',
-    category: 'Ferreteria / Inventario',
     reason: 'UsoCFDI G01 marks merchandise purchased for resale.',
   },
   G02: {
