@@ -54,36 +54,32 @@ export function suggestCategory(description, provider = '') {
   const p = provider.toLowerCase();
 
   // Marcas de Truper y categorías específicas
-  if (p.includes('foset') || d.includes('foset')) return 'Plomería';
-  if (p.includes('hermex') || d.includes('hermex') || d.includes('candado') || d.includes('cerradura') || d.includes('chapa')) return 'Cerrajería';
+  if (p.includes('foset') || d.includes('foset')) return 'Grifería';
+  if (p.includes('hermex') || d.includes('hermex') || d.includes('candado') || d.includes('cerradura') || d.includes('chapa')) return 'Accesorios de cerrajería';
   if (p.includes('volteck') || p.includes('voltek') || d.includes('volteck')) return 'Material Eléctrico';
-  if (p.includes('klintek') || d.includes('klintek') || d.includes('escoba')) return 'Jarciería y Limpieza';
+  if (p.includes('klintek') || d.includes('klintek') || d.includes('escoba')) return 'Escobas para jardín nacionales';
   if (p.includes('fiero') || d.includes('fiero')) {
     if (d.includes('malla') || d.includes('ciclonica') || d.includes('ciclónica')) return 'Mallas ciclónicas';
-    if (d.includes('clavo') || d.includes('tornillo') || d.includes('pija') || d.includes('tuerca')) return 'Fijación y Soporte';
-    if (d.includes('alambre') || d.includes('pua') || d.includes('malla')) return 'Aceros y Mallas';
-    return 'Acero y Construcción';
+    if (d.includes('clavo') || d.includes('tornillo') || d.includes('pija') || d.includes('tuerca')) return 'Tornillos, tuercas y arandelas';
+    if (d.includes('alambre') || d.includes('pua') || d.includes('malla')) return 'Alambre galvanizado';
+    return 'Adhesivos y fijadores';
   }
-  if (p.includes('pretul') || d.includes('pretul')) return 'Herramienta Manual (Pretul)';
-  if (p.includes('truper') || d.includes('truper')) return 'Herramienta Manual';
+  if (p.includes('pretul') || d.includes('pretul')) return 'Juegos de herramientas Pretul';
+  if (p.includes('truper') || d.includes('truper')) return 'Juegos de herramientas Truper';
 
   // Otras Marcas
-  if (p.includes('solvex') || p.includes('siflux')) return 'Plomería';
+  if (p.includes('solvex') || p.includes('siflux') || p.includes('sifluss')) return 'Grifería';
   if (p.includes('electrica') || p.includes('el 45')) return 'Material Eléctrico';
 
   // Lógica General
-  if (d.includes('tubo') || d.includes('pvc') || d.includes('codo') || d.includes('conector') || d.includes('valvula') || d.includes('cpvc')) return 'Plomería';
+  if (d.includes('tubo') || d.includes('pvc') || d.includes('codo') || d.includes('conector') || d.includes('valvula') || d.includes('cpvc')) return 'Grifería';
   if (d.includes('cable') || d.includes('foco') || d.includes('apagador') || d.includes('contacto') || d.includes('luminaria') || d.includes('led')) return 'Material Eléctrico';
-  if (d.includes('martillo') || d.includes('pinza') || d.includes('desarmador') || d.includes('llave') || d.includes('dado') || d.includes('matraca')) return 'Herramienta Manual';
-  if (d.includes('pintura') || d.includes('brocha') || d.includes('rodillo') || d.includes('esmalte') || d.includes('sellador')) return 'Pinturas y Accesorios';
-  if (d.includes('flete') || d.includes('envio') || d.includes('acarreo')) return 'Servicios / Fletes';
-  if (d.includes('renta') || d.includes('alquiler')) return 'Gastos / Arrendamiento';
-  if (d.includes('luz') || d.includes('cfe') || d.includes('electrica')) return 'Servicios / Electricidad';
-  if (d.includes('tel') || d.includes('internet') || d.includes('izzi') || d.includes('telmex')) return 'Servicios / Telecom';
-  if (d.includes('gasolin') || d.includes('diesel') || d.includes('combustible')) return 'Gastos / Combustible';
-  if (d.includes('limpieza') || d.includes('detergente') || d.includes('jabon') || d.includes('papel')) return 'Gastos / Limpieza';
+  if (d.includes('martillo') || d.includes('pinza') || d.includes('desarmador') || d.includes('llave') || d.includes('dado') || d.includes('matraca')) return 'Juegos de herramientas Truper';
+  if (d.includes('pintura') || d.includes('brocha') || d.includes('rodillo') || d.includes('esmalte') || d.includes('sellador')) return 'Pintura esmalte';
+  if (d.includes('flete') || d.includes('envio') || d.includes('acarreo')) return 'Services';
+  if (d.includes('renta') || d.includes('alquiler') || d.includes('luz') || d.includes('cfe') || d.includes('tel') || d.includes('internet') || d.includes('gasolin') || d.includes('limpieza')) return 'Services';
   
-  return 'Ferretería General';
+  return 'Goods';
 }
 
 export function suggestAccount(description) {
